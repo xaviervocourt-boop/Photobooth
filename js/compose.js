@@ -121,6 +121,30 @@ export function composeStrip(frames, s) {
   return canvas;
 }
 
+// Cadre PNG personnalisé : photos dans les zones transparentes, PNG par-dessus.
+export function composeWithFrame(frames, frame, slots, s) {
+  const canvas = document.createElement('canvas');
+  canvas.width = frame.width;
+  canvas.height = frame.height;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = s.frameColor;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  frames.forEach((f, i) => {
+    const slot = slots[i];
+    // Recadrage centré si le ratio diffère légèrement de la zone.
+    const ar = slot.w / slot.h;
+    let sw = f.width;
+    let sh = f.width / ar;
+    if (sh > f.height) {
+      sh = f.height;
+      sw = f.height * ar;
+    }
+    ctx.drawImage(f, (f.width - sw) / 2, (f.height - sh) / 2, sw, sh, slot.x, slot.y, slot.w, slot.h);
+  });
+  ctx.drawImage(frame.img, 0, 0, frame.width, frame.height);
+  return canvas;
+}
+
 export function makeThumb(canvas, size = 360) {
   const scale = size / Math.max(canvas.width, canvas.height);
   const t = document.createElement('canvas');

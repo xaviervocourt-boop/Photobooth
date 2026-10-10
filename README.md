@@ -6,11 +6,27 @@ Une web app (PWA) qui transforme un iPad en photobooth. On l'installe sur l'écr
 
 - **1 photo ou bande de 4** : au choix de l'invité, ou format imposé dans les réglages
 - **Filtres** avec aperçu en direct : Normal, Noir & blanc, Sépia, Vintage, Chaud, Froid, Pop, Ciné
-- **Cadre personnalisé** : titre, texte, date, couleurs et police
+- **Votre propre cadre PNG** fait dans Photoshop, ou un cadre généré (titre, texte, date, couleurs, police)
 - **Galerie** de toutes les photos de l'événement, avec export vers Photos ou AirDrop
 - **Envoi par mail** avec **file d'attente hors ligne** : sans réseau, la demande est gardée sur l'iPad et part toute seule dès que la connexion revient
 - Compte à rebours, flash, son, écran qui reste allumé
 - Réglages protégés par un **code PIN** (par défaut : `0000`)
+
+## Utiliser votre propre cadre (PNG Photoshop)
+
+1. Dans Photoshop, créez votre cadre et **supprimez le fond aux endroits où doivent apparaître les photos** : ces zones doivent être transparentes (le damier gris et blanc).
+   - Cadre « 1 photo » : **1** zone transparente
+   - Cadre « bande de 4 » : **4** zones transparentes, lues de haut en bas puis de gauche à droite (une grille 2 × 2 marche aussi)
+2. **Fichier → Exporter → Exporter sous… → PNG**, en gardant la transparence.
+3. Envoyez le PNG sur l'iPad (AirDrop, iCloud Drive, mail…).
+4. Dans l'app, ouvrez les réglages (⚙️), section **Cadre**, puis **Choisir un PNG**. L'app indique combien de zones elle a trouvées. **Voir un aperçu** montre le résultat.
+
+Conseils :
+- La photo finale fait la taille de votre PNG. Visez au moins **1800 px** de large pour un cadre « 1 photo », et environ **1200 × 3600 px** pour une bande.
+- Le ratio de chaque zone transparente décide du cadrage de la caméra : une zone 4:3 ou 3:2 rend mieux qu'une zone très allongée.
+- Les formes arrondies ou fantaisie marchent : la photo est placée sous le PNG, qui la découpe.
+- Avec un cadre PNG, le titre, le texte et la date des réglages ne sont pas ajoutés : mettez-les directement dans votre design.
+- Le cadre est enregistré sur l'iPad et marche hors ligne. Sans PNG, l'app crée un cadre simple.
 
 ## 1. Mettre l'app en ligne
 
@@ -79,6 +95,7 @@ index.html            écrans de l'app
 styles.css            styles
 js/app.js             logique principale (caméra, prise de vue, galerie, réglages)
 js/compose.js         mise en page des photos (cadre, bande de 4, texte)
+js/frames.js          cadres PNG perso (détection des zones transparentes)
 js/filters.js         filtres (aperçu CSS + rendu pixel identique)
 js/outbox.js          file d'envoi des mails, hors ligne
 js/db.js              stockage IndexedDB

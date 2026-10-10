@@ -1,13 +1,16 @@
 import { db, uid } from './db.js';
 import { settings, saveSettings } from './settings.js';
 import { FILTERS, getFilter, cssFilter } from './filters.js';
-import { grabFrame, composeSingle, composeStrip, makeThumb, toBlob, sampleFrame, STRIP_ASPECT } from './compose.js';
+import {
+  grabFrame, composeSingle, composeStrip, composeWithFrame, makeThumb, toBlob, sampleFrame, STRIP_ASPECT,
+} from './compose.js';
+import { saveFrame, removeFrame, loadFrames, getFrame, frameSlots, describeFrame } from './frames.js';
 import {
   enqueueEmail, parseEmails, processOutbox, startOutboxWorker, onOutboxChange,
   getOutbox, retryErrors, clearSent, testRelay,
 } from './outbox.js';
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const IDLE_TIMEOUT_MS = 90000;
 const EXPORT_BATCH = 25;
 
@@ -22,6 +25,7 @@ const state = {
   mode: 'single',
   filterId: 'none',
   busy: false,
+  shotIndex: 0,
   lastPhotoId: null,
   emailTargetId: null,
   viewerPhotoId: null,
@@ -87,8 +91,19 @@ async function startCamera() {
   }
 }
 
+// Ratio de la photo à prendre : celui de la zone transparente du cadre PNG s'il y en a un.
+function shotAspect(mode, i) {
+  const frame = getFrame(mode);
+  if (frame) {
+    const slot = frameSlots(frame, mode)[i];
+    return slot.w / slot.h;
+  }
+  return mode === 'strip' ? STRIP_ASPECT : null;
+}
+
 function currentAspect() {
-  if (state.screen !== 'home' && state.mode === 'strip') return STRIP_ASPECT;
+  const shot = state.screen !== 'home' && shotAspect(state.mode, state.shotIndex);
+  if (shot) return shot;
   if (video.videoWidth && video.videoHeight) return video.videoWidth / video.videoHeight;
   return window.innerWidth / window.innerHeight;
 }
@@ -169,6 +184,7 @@ async function begin(mode) {
   unlockAudio();
   if (!(await startCamera())) return;
   state.mode = mode;
+  state.shotIndex = 0;
   state.filterId = 'none';
   renderFilterList();
   showScreen('filter');
@@ -255,7 +271,8 @@ async function runCapture() {
   state.busy = true;
   const filter = getFilter(state.filterId);
   const shots = state.mode === 'strip' ? 4 : 1;
-  const aspect = currentAspect();
+  const frame = getFrame(state.mode);
+  const slots = frame && frameSlots(frame, state.mode);
   const frames = [];
   const cd = $('#countdown');
   const counter = $('#shot-counter');
@@ -264,6 +281,8 @@ async function runCapture() {
     applyLiveSettings();
     await requestWakeLock();
     for (let i = 0; i < shots; i++) {
+      state.shotIndex = i;
+      layoutViewfinder();
       counter.textContent = shots > 1 ? `Photo ${i + 1} / ${shots}` : '';
       counter.classList.toggle('hidden', shots === 1);
       const seconds = Math.max(1, Math.round(Number(settings.countdown) || 3));
@@ -276,7 +295,8 @@ async function runCapture() {
         await sleep(1000);
       }
       cd.classList.add('hidden');
-      frames.push(grabFrame(video, aspect, { mirror: settings.mirror, filter }));
+      const maxWidth = slots ? Math.min(2400, slots[i].w) : 1600;
+      frames.push(grabFrame(video, currentAspect(), { mirror: settings.mirror, filter, maxWidth }));
       shutterSound();
       const flash = $('#flash');
       flash.classList.remove('go');
@@ -285,7 +305,9 @@ async function runCapture() {
       if (i < shots - 1) await sleep(Math.max(0, Number(settings.pause) || 0) * 1000 + 300);
     }
     counter.classList.add('hidden');
-    const final = shots > 1 ? composeStrip(frames, settings) : composeSingle(frames[0], settings);
+    let final;
+    if (frame) final = composeWithFrame(frames, frame, slots, settings);
+    else final = shots > 1 ? composeStrip(frames, settings) : composeSingle(frames[0], settings);
     const photo = {
       id: uid(),
       createdAt: Date.now(),
@@ -303,6 +325,7 @@ async function runCapture() {
     showScreen('home');
   } finally {
     state.busy = false;
+    state.shotIndex = 0;
     cd.classList.add('hidden');
     counter.classList.add('hidden');
   }
@@ -474,6 +497,7 @@ function openSettings() {
   $('#test-relay-result').textContent = '';
   renderSettingsStats();
   renderOutbox();
+  renderFrameUploads();
   showScreen('settings');
   document.body.classList.add('admin');
 }
@@ -492,15 +516,75 @@ document.querySelectorAll('[data-setting]').forEach((el) => {
 
 $('#settings-close').addEventListener('click', () => showScreen('home'));
 
-$('#preview-frame').addEventListener('click', async () => {
-  const strip = settings.mode === 'strip';
-  const canvas = strip
+function previewCanvas(mode) {
+  const frame = getFrame(mode);
+  if (frame) {
+    const slots = frameSlots(frame, mode);
+    return composeWithFrame(slots.map((s) => sampleFrame(s.w / s.h)), frame, slots, settings);
+  }
+  return mode === 'strip'
     ? composeStrip([0, 1, 2, 3].map(() => sampleFrame(STRIP_ASPECT)), settings)
     : composeSingle(sampleFrame(4 / 3), settings);
-  const img = $('#frame-preview');
-  if (img.src) URL.revokeObjectURL(img.src);
-  img.src = URL.createObjectURL(await toBlob(canvas));
-  img.classList.remove('hidden');
+}
+
+$('#preview-frame').addEventListener('click', async () => {
+  const box = $('#frame-preview');
+  box.querySelectorAll('img').forEach((i) => URL.revokeObjectURL(i.src));
+  box.innerHTML = '';
+  const modes = settings.mode === 'choice' ? ['single', 'strip'] : [settings.mode];
+  for (const mode of modes) {
+    const img = document.createElement('img');
+    img.alt = 'Aperçu';
+    img.src = URL.createObjectURL(await toBlob(previewCanvas(mode)));
+    box.append(img);
+  }
+  box.classList.remove('hidden');
+});
+
+function renderFrameUploads() {
+  document.querySelectorAll('.frame-upload').forEach((el) => {
+    const mode = el.dataset.frameMode;
+    const frame = getFrame(mode);
+    const img = el.querySelector('img');
+    const info = el.querySelector('.frame-info');
+    if (img.src) URL.revokeObjectURL(img.src);
+    if (frame) {
+      img.src = URL.createObjectURL(frame.blob);
+      const d = describeFrame(frame, mode);
+      info.textContent = d.text;
+      info.classList.toggle('warn', d.warn);
+    } else {
+      img.removeAttribute('src');
+      info.textContent = '';
+    }
+    img.classList.toggle('hidden', !frame);
+    el.querySelector('.frame-thumb span').classList.toggle('hidden', Boolean(frame));
+    el.querySelector('.frame-remove').classList.toggle('hidden', !frame);
+  });
+}
+
+document.querySelectorAll('.frame-upload').forEach((el) => {
+  const mode = el.dataset.frameMode;
+  const input = el.querySelector('input[type=file]');
+  input.addEventListener('change', async () => {
+    const file = input.files[0];
+    input.value = '';
+    if (!file) return;
+    try {
+      await saveFrame(mode, file);
+      renderFrameUploads();
+      $('#frame-preview').classList.add('hidden');
+      toast('Cadre enregistré ✓');
+    } catch (err) {
+      toast(`Impossible de lire ce fichier : ${err.message || err}`);
+    }
+  });
+  el.querySelector('.frame-remove').addEventListener('click', async () => {
+    if (!confirm('Retirer ce cadre ?')) return;
+    await removeFrame(mode);
+    renderFrameUploads();
+    $('#frame-preview').classList.add('hidden');
+  });
 });
 
 $('#test-relay').addEventListener('click', async () => {
@@ -612,6 +696,7 @@ document.addEventListener('pointerdown', requestWakeLock, { once: true });
 
 $('#app-version').textContent = VERSION;
 renderHome();
+loadFrames().catch((err) => console.warn('Cadres', err));
 startOutboxWorker();
 startCamera();
 

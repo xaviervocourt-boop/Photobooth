@@ -158,6 +158,28 @@
 
       <fieldset>
         <legend>Cadre</legend>
+        <p class="muted small">Votre propre cadre : dans Photoshop, laissez <strong>transparentes</strong> les zones où iront les photos (1 zone pour « 1 photo », 4 zones pour la bande), puis exportez en PNG.</p>
+        <div class="frame-uploads">
+          <div class="frame-upload" data-frame-mode="single">
+            <h3>Cadre « 1 photo »</h3>
+            <div class="frame-thumb"><img alt="" class="hidden"><span>Aucun cadre</span></div>
+            <p class="frame-info small"></p>
+            <div class="btn-row">
+              <label class="secondary file-btn">Choisir un PNG<input type="file" accept="image/png"></label>
+              <button type="button" class="danger frame-remove hidden">Retirer</button>
+            </div>
+          </div>
+          <div class="frame-upload" data-frame-mode="strip">
+            <h3>Cadre « bande de 4 »</h3>
+            <div class="frame-thumb"><img alt="" class="hidden"><span>Aucun cadre</span></div>
+            <p class="frame-info small"></p>
+            <div class="btn-row">
+              <label class="secondary file-btn">Choisir un PNG<input type="file" accept="image/png"></label>
+              <button type="button" class="danger frame-remove hidden">Retirer</button>
+            </div>
+          </div>
+        </div>
+        <p class="muted small">Sans cadre PNG, l'app crée un cadre simple avec les réglages ci-dessous (titre, texte, date, couleurs, police).</p>
         <div class="grid2">
           <label>Couleur du cadre <input data-setting="frameColor" type="color"></label>
           <label>Couleur du texte <input data-setting="textColor" type="color"></label>
@@ -170,7 +192,7 @@
           </select>
         </label>
         <button id="preview-frame" type="button" class="secondary">Voir un aperçu</button>
-        <img id="frame-preview" class="frame-preview hidden" alt="Aperçu">
+        <div id="frame-preview" class="frame-preview hidden"></div>
       </fieldset>
 
       <fieldset>
