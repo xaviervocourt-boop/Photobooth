@@ -1,0 +1,624 @@
+import { db, uid } from './db.js';
+import { settings, saveSettings } from './settings.js';
+import { FILTERS, getFilter, cssFilter } from './filters.js';
+import { grabFrame, composeSingle, composeStrip, makeThumb, toBlob, sampleFrame, STRIP_ASPECT } from './compose.js';
+import {
+  enqueueEmail, parseEmails, processOutbox, startOutboxWorker, onOutboxChange,
+  getOutbox, retryErrors, clearSent, testRelay,
+} from './outbox.js';
+
+const VERSION = '1.0.0';
+const IDLE_TIMEOUT_MS = 90000;
+const EXPORT_BATCH = 25;
+
+const $ = (sel) => document.querySelector(sel);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const video = $('#video');
+const viewfinder = $('#viewfinder');
+
+const state = {
+  screen: 'home',
+  mode: 'single',
+  filterId: 'none',
+  busy: false,
+  lastPhotoId: null,
+  emailTargetId: null,
+  viewerPhotoId: null,
+  stream: null,
+};
+
+/* ---------------- Navigation ---------------- */
+
+function showScreen(name) {
+  state.screen = name;
+  document.querySelectorAll('.screen').forEach((s) => s.classList.toggle('active', s.id === `screen-${name}`));
+  if (name === 'home') {
+    document.body.classList.remove('admin');
+    renderHome();
+  }
+  layoutViewfinder();
+  resetIdle();
+}
+
+let idleTimer;
+function resetIdle() {
+  clearTimeout(idleTimer);
+  if (['filter', 'result', 'gallery'].includes(state.screen)) {
+    idleTimer = setTimeout(() => {
+      closeModals();
+      showScreen('home');
+    }, IDLE_TIMEOUT_MS);
+  }
+}
+['pointerdown', 'keydown'].forEach((ev) => document.addEventListener(ev, resetIdle, { passive: true }));
+
+function closeModals() {
+  document.querySelectorAll('.modal').forEach((m) => m.classList.add('hidden'));
+}
+
+let toastTimer;
+function toast(msg, ms = 4000) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.remove('hidden');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.add('hidden'), ms);
+}
+
+/* ---------------- Caméra ---------------- */
+
+async function startCamera() {
+  if (state.stream && state.stream.active) return true;
+  try {
+    state.stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: 'user', width: { ideal: 1920 }, height: { ideal: 1440 } },
+    });
+    video.srcObject = state.stream;
+    await video.play().catch(() => {});
+    if (!video.videoWidth) await new Promise((r) => video.addEventListener('loadedmetadata', r, { once: true }));
+    layoutViewfinder();
+    return true;
+  } catch (err) {
+    console.error(err);
+    toast("Impossible d'accéder à la caméra. Autorisez-la dans Réglages > Safari > Caméra.", 8000);
+    return false;
+  }
+}
+
+function currentAspect() {
+  if (state.screen !== 'home' && state.mode === 'strip') return STRIP_ASPECT;
+  if (video.videoWidth && video.videoHeight) return video.videoWidth / video.videoHeight;
+  return window.innerWidth / window.innerHeight;
+}
+
+function layoutViewfinder() {
+  const ar = currentAspect();
+  const W = window.innerWidth;
+  const H = window.innerHeight;
+  let w = W;
+  let h = W / ar;
+  if (h > H) {
+    h = H;
+    w = H * ar;
+  }
+  viewfinder.style.width = `${Math.floor(w)}px`;
+  viewfinder.style.height = `${Math.floor(h)}px`;
+}
+window.addEventListener('resize', layoutViewfinder);
+video.addEventListener('resize', layoutViewfinder);
+
+function applyLiveSettings() {
+  video.classList.toggle('mirror', settings.mirror);
+  video.style.filter = state.screen === 'home' ? 'none' : cssFilter(getFilter(state.filterId));
+}
+
+/* ---------------- Sons ---------------- */
+
+let audioCtx;
+function unlockAudio() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  } catch {
+    // pas de son, pas grave
+  }
+}
+
+function beep(freq = 880, duration = 0.12, volume = 0.15) {
+  if (!audioCtx) return;
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.frequency.value = freq;
+  g.gain.setValueAtTime(volume, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + duration);
+  o.connect(g).connect(audioCtx.destination);
+  o.start();
+  o.stop(audioCtx.currentTime + duration);
+}
+
+function shutterSound() {
+  if (!audioCtx) return;
+  const len = audioCtx.sampleRate * 0.08;
+  const buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len) ** 2;
+  const src = audioCtx.createBufferSource();
+  const g = audioCtx.createGain();
+  g.gain.value = 0.4;
+  src.buffer = buf;
+  src.connect(g).connect(audioCtx.destination);
+  src.start();
+}
+
+/* ---------------- Accueil ---------------- */
+
+function renderHome() {
+  $('#home-title').textContent = settings.title || 'Photobooth';
+  const choice = settings.mode === 'choice';
+  $('#mode-choice').classList.toggle('hidden', !choice);
+  $('#btn-start').classList.toggle('hidden', choice);
+  $('#home-sub').textContent = choice ? 'Choisissez votre format' : 'Touchez pour commencer';
+  $('#btn-gallery').classList.toggle('hidden', !settings.galleryPublic);
+  applyLiveSettings();
+  updateNetStatus();
+}
+
+async function begin(mode) {
+  unlockAudio();
+  if (!(await startCamera())) return;
+  state.mode = mode;
+  state.filterId = 'none';
+  renderFilterList();
+  showScreen('filter');
+  applyLiveSettings();
+}
+
+document.querySelectorAll('.big-choice').forEach((btn) => {
+  btn.addEventListener('click', () => begin(btn.dataset.mode));
+});
+$('#btn-start').addEventListener('click', () => begin(settings.mode));
+$('#screen-home').addEventListener('click', (e) => {
+  // Toucher n'importe où démarre quand le format est imposé.
+  if (settings.mode !== 'choice' && !e.target.closest('button')) begin(settings.mode);
+  else if (!e.target.closest('button')) startCamera();
+});
+document.querySelectorAll('[data-action="home"]').forEach((b) => b.addEventListener('click', () => showScreen('home')));
+
+/* ---------------- Filtres ---------------- */
+
+let previewTimer;
+function renderFilterList() {
+  const list = $('#filter-list');
+  list.innerHTML = '';
+  FILTERS.forEach((f) => {
+    const btn = document.createElement('button');
+    btn.className = 'filter-btn';
+    btn.dataset.id = f.id;
+    const c = document.createElement('canvas');
+    c.width = 192;
+    c.height = 144;
+    c.style.filter = cssFilter(f);
+    const label = document.createElement('span');
+    label.textContent = f.name;
+    btn.append(c, label);
+    btn.addEventListener('click', () => {
+      state.filterId = f.id;
+      markSelectedFilter();
+      applyLiveSettings();
+    });
+    list.append(btn);
+  });
+  markSelectedFilter();
+  clearInterval(previewTimer);
+  drawFilterPreviews();
+  previewTimer = setInterval(() => {
+    if (state.screen !== 'filter') return clearInterval(previewTimer);
+    drawFilterPreviews();
+  }, 400);
+}
+
+function markSelectedFilter() {
+  document.querySelectorAll('.filter-btn').forEach((b) => b.classList.toggle('selected', b.dataset.id === state.filterId));
+}
+
+function drawFilterPreviews() {
+  if (!video.videoWidth) return;
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  const ar = 4 / 3;
+  let sw = vw;
+  let sh = vw / ar;
+  if (sh > vh) {
+    sh = vh;
+    sw = vh * ar;
+  }
+  document.querySelectorAll('.filter-btn canvas').forEach((c) => {
+    const ctx = c.getContext('2d');
+    ctx.save();
+    if (settings.mirror) {
+      ctx.translate(c.width, 0);
+      ctx.scale(-1, 1);
+    }
+    ctx.drawImage(video, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, c.width, c.height);
+    ctx.restore();
+  });
+}
+
+$('#btn-go').addEventListener('click', runCapture);
+
+/* ---------------- Prise de vue ---------------- */
+
+async function runCapture() {
+  if (state.busy) return;
+  state.busy = true;
+  const filter = getFilter(state.filterId);
+  const shots = state.mode === 'strip' ? 4 : 1;
+  const aspect = currentAspect();
+  const frames = [];
+  const cd = $('#countdown');
+  const counter = $('#shot-counter');
+  try {
+    showScreen('capture');
+    applyLiveSettings();
+    await requestWakeLock();
+    for (let i = 0; i < shots; i++) {
+      counter.textContent = shots > 1 ? `Photo ${i + 1} / ${shots}` : '';
+      counter.classList.toggle('hidden', shots === 1);
+      const seconds = Math.max(1, Math.round(Number(settings.countdown) || 3));
+      for (let n = seconds; n > 0; n--) {
+        cd.textContent = n;
+        cd.classList.remove('hidden', 'pop');
+        void cd.offsetWidth; // relance l'animation
+        cd.classList.add('pop');
+        beep(n === 1 ? 1320 : 880);
+        await sleep(1000);
+      }
+      cd.classList.add('hidden');
+      frames.push(grabFrame(video, aspect, { mirror: settings.mirror, filter }));
+      shutterSound();
+      const flash = $('#flash');
+      flash.classList.remove('go');
+      void flash.offsetWidth;
+      flash.classList.add('go');
+      if (i < shots - 1) await sleep(Math.max(0, Number(settings.pause) || 0) * 1000 + 300);
+    }
+    counter.classList.add('hidden');
+    const final = shots > 1 ? composeStrip(frames, settings) : composeSingle(frames[0], settings);
+    const photo = {
+      id: uid(),
+      createdAt: Date.now(),
+      mode: state.mode,
+      filter: filter.id,
+      blob: await toBlob(final, 0.9),
+      thumb: await toBlob(makeThumb(final), 0.8),
+    };
+    await db.put('photos', photo);
+    state.lastPhotoId = photo.id;
+    showResult(photo);
+  } catch (err) {
+    console.error(err);
+    toast(`Oups, la photo a échoué : ${err.message || err}`);
+    showScreen('home');
+  } finally {
+    state.busy = false;
+    cd.classList.add('hidden');
+    counter.classList.add('hidden');
+  }
+}
+
+/* ---------------- Résultat ---------------- */
+
+let resultUrl;
+function showResult(photo) {
+  if (resultUrl) URL.revokeObjectURL(resultUrl);
+  resultUrl = URL.createObjectURL(photo.blob);
+  $('#result-img').src = resultUrl;
+  showScreen('result');
+}
+
+$('#btn-email').addEventListener('click', () => openEmail(state.lastPhotoId));
+$('#btn-done').addEventListener('click', () => showScreen('home'));
+$('#btn-retake').addEventListener('click', async () => {
+  if (state.lastPhotoId) await db.del('photos', state.lastPhotoId);
+  state.lastPhotoId = null;
+  begin(state.mode);
+});
+
+/* ---------------- Email ---------------- */
+
+function openEmail(photoId) {
+  state.emailTargetId = photoId;
+  $('#email-input').value = '';
+  $('#email-error').classList.add('hidden');
+  $('#email-modal').classList.remove('hidden');
+  setTimeout(() => $('#email-input').focus(), 50);
+}
+
+$('#email-cancel').addEventListener('click', () => $('#email-modal').classList.add('hidden'));
+$('#email-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const emails = parseEmails($('#email-input').value);
+  if (!emails) {
+    const err = $('#email-error');
+    err.textContent = 'Adresse email invalide.';
+    err.classList.remove('hidden');
+    return;
+  }
+  $('#email-input').blur();
+  $('#email-modal').classList.add('hidden');
+  await enqueueEmail(state.emailTargetId, emails);
+  if (navigator.onLine && settings.scriptUrl) {
+    toast('Envoi en cours… ✉️');
+    await processOutbox();
+    const item = (await getOutbox()).find((i) => i.photoId === state.emailTargetId);
+    if (item && item.status === 'sent') toast('Photo envoyée ! Pensez à vérifier vos spams. ✅', 5000);
+    else toast("Pas de réseau pour l'instant : la photo partira automatiquement dès le retour de la connexion. 👍", 6000);
+  } else {
+    toast("Pas de réseau pour l'instant : la photo partira automatiquement dès le retour de la connexion. 👍", 6000);
+  }
+});
+
+/* ---------------- Galerie ---------------- */
+
+let galleryUrls = [];
+async function renderGallery() {
+  galleryUrls.forEach((u) => URL.revokeObjectURL(u));
+  galleryUrls = [];
+  const photos = (await db.all('photos')).sort((a, b) => b.createdAt - a.createdAt);
+  const grid = $('#gallery-grid');
+  grid.innerHTML = '';
+  $('#gallery-count').textContent = photos.length ? `(${photos.length})` : '';
+  $('#gallery-empty').classList.toggle('hidden', photos.length > 0);
+  photos.forEach((p) => {
+    const url = URL.createObjectURL(p.thumb || p.blob);
+    galleryUrls.push(url);
+    const btn = document.createElement('button');
+    const img = document.createElement('img');
+    img.src = url;
+    img.loading = 'lazy';
+    img.alt = '';
+    btn.append(img);
+    btn.addEventListener('click', () => openViewer(p));
+    grid.append(btn);
+  });
+}
+
+async function openGallery() {
+  await renderGallery();
+  showScreen('gallery');
+}
+$('#btn-gallery').addEventListener('click', openGallery);
+
+let viewerUrl;
+function openViewer(photo) {
+  state.viewerPhotoId = photo.id;
+  if (viewerUrl) URL.revokeObjectURL(viewerUrl);
+  viewerUrl = URL.createObjectURL(photo.blob);
+  $('#viewer-img').src = viewerUrl;
+  $('#viewer').classList.remove('hidden');
+}
+
+$('#viewer-close').addEventListener('click', () => $('#viewer').classList.add('hidden'));
+$('#viewer-email').addEventListener('click', () => {
+  $('#viewer').classList.add('hidden');
+  openEmail(state.viewerPhotoId);
+});
+$('#viewer-share').addEventListener('click', async () => {
+  const photo = await db.get('photos', state.viewerPhotoId);
+  if (photo) await sharePhotos([photo]);
+});
+$('#viewer-delete').addEventListener('click', async () => {
+  if (!confirm('Supprimer cette photo ?')) return;
+  await db.del('photos', state.viewerPhotoId);
+  $('#viewer').classList.add('hidden');
+  renderGallery();
+  renderSettingsStats();
+});
+
+function photoFile(p) {
+  const stamp = new Date(p.createdAt).toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  return new File([p.blob], `photobooth-${stamp}.jpg`, { type: 'image/jpeg' });
+}
+
+async function sharePhotos(photos) {
+  const files = photos.map(photoFile);
+  try {
+    if (navigator.canShare && navigator.canShare({ files })) {
+      await navigator.share({ files });
+      return;
+    }
+  } catch (err) {
+    if (err.name === 'AbortError') return;
+    console.warn(err);
+  }
+  // Repli (ordinateur) : téléchargement direct.
+  for (const f of files) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(f);
+    a.download = f.name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    await sleep(250);
+  }
+}
+
+/* ---------------- Réglages ---------------- */
+
+$('#btn-settings').addEventListener('click', () => {
+  $('#pin-input').value = '';
+  $('#pin-error').classList.add('hidden');
+  $('#pin-modal').classList.remove('hidden');
+  setTimeout(() => $('#pin-input').focus(), 50);
+});
+$('#pin-cancel').addEventListener('click', () => $('#pin-modal').classList.add('hidden'));
+$('#pin-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  if ($('#pin-input').value !== String(settings.pin)) {
+    $('#pin-error').classList.remove('hidden');
+    return;
+  }
+  $('#pin-input').blur();
+  $('#pin-modal').classList.add('hidden');
+  openSettings();
+});
+
+function openSettings() {
+  document.querySelectorAll('[data-setting]').forEach((el) => {
+    const v = settings[el.dataset.setting];
+    if (el.type === 'checkbox') el.checked = Boolean(v);
+    else el.value = v;
+  });
+  $('#frame-preview').classList.add('hidden');
+  $('#test-relay-result').textContent = '';
+  renderSettingsStats();
+  renderOutbox();
+  showScreen('settings');
+  document.body.classList.add('admin');
+}
+
+document.querySelectorAll('[data-setting]').forEach((el) => {
+  el.addEventListener('change', () => {
+    const key = el.dataset.setting;
+    if (el.type === 'checkbox') settings[key] = el.checked;
+    else if (el.type === 'number') settings[key] = Number(el.value);
+    else settings[key] = el.value.trim();
+    if (key === 'pin' && !settings.pin) settings.pin = '0000';
+    saveSettings();
+    if (key === 'scriptUrl' || key === 'secret') processOutbox();
+  });
+});
+
+$('#settings-close').addEventListener('click', () => showScreen('home'));
+
+$('#preview-frame').addEventListener('click', async () => {
+  const strip = settings.mode === 'strip';
+  const canvas = strip
+    ? composeStrip([0, 1, 2, 3].map(() => sampleFrame(STRIP_ASPECT)), settings)
+    : composeSingle(sampleFrame(4 / 3), settings);
+  const img = $('#frame-preview');
+  if (img.src) URL.revokeObjectURL(img.src);
+  img.src = URL.createObjectURL(await toBlob(canvas));
+  img.classList.remove('hidden');
+});
+
+$('#test-relay').addEventListener('click', async () => {
+  const out = $('#test-relay-result');
+  out.style.color = '';
+  out.textContent = 'Test en cours…';
+  try {
+    await testRelay();
+    out.style.color = 'var(--ok)';
+    out.textContent = 'Connexion OK ✅';
+  } catch (err) {
+    out.style.color = 'var(--danger)';
+    out.textContent = `Échec : ${err.message || err}`;
+  }
+});
+
+$('#outbox-retry').addEventListener('click', async () => {
+  if (!navigator.onLine) toast("L'iPad est hors ligne.");
+  else if (!settings.scriptUrl) toast("Renseignez d'abord l'URL du relais.");
+  await processOutbox();
+});
+$('#outbox-retry-errors').addEventListener('click', retryErrors);
+$('#outbox-clear-sent').addEventListener('click', clearSent);
+
+const STATUS_LABEL = { pending: 'En attente', sent: 'Envoyé', error: 'Échec' };
+
+async function renderOutbox() {
+  const items = await getOutbox();
+  const count = (st) => items.filter((i) => i.status === st).length;
+  $('#outbox-summary').textContent =
+    `${count('pending')} en attente · ${count('sent')} envoyé(s) · ${count('error')} en échec` +
+    (settings.scriptUrl ? '' : ' — relais non configuré');
+  const list = $('#outbox-list');
+  list.innerHTML = '';
+  items.slice(0, 100).forEach((i) => {
+    const li = document.createElement('li');
+    const who = document.createElement('span');
+    who.textContent = `${i.email} — ${new Date(i.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`;
+    const st = document.createElement('span');
+    st.className = `st-${i.status}`;
+    st.textContent = STATUS_LABEL[i.status] + (i.status !== 'sent' && i.lastError ? ` (${i.lastError})` : '');
+    li.append(who, st);
+    list.append(li);
+  });
+}
+
+async function renderSettingsStats() {
+  const photos = (await db.all('photos')).sort((a, b) => a.createdAt - b.createdAt);
+  $('#photos-summary').textContent = `${photos.length} photo(s) enregistrée(s) sur l'iPad.`;
+  const box = $('#export-batches');
+  box.innerHTML = '';
+  for (let i = 0; i < photos.length; i += EXPORT_BATCH) {
+    const batch = photos.slice(i, i + EXPORT_BATCH);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'secondary';
+    btn.textContent = photos.length <= EXPORT_BATCH
+      ? '📤 Exporter toutes les photos'
+      : `📤 Exporter ${i + 1}–${i + batch.length}`;
+    btn.addEventListener('click', () => sharePhotos(batch));
+    box.append(btn);
+  }
+}
+
+$('#delete-all').addEventListener('click', async () => {
+  if (!confirm('Supprimer définitivement TOUTES les photos ?')) return;
+  if (!confirm('Vraiment sûr ? Les mails encore en attente ne pourront plus partir.')) return;
+  await db.clear('photos');
+  renderSettingsStats();
+  toast('Toutes les photos ont été supprimées.');
+});
+
+/* ---------------- Réseau / file ---------------- */
+
+async function updateNetStatus() {
+  const pending = (await getOutbox()).filter((i) => i.status === 'pending').length;
+  const parts = [];
+  if (!navigator.onLine) parts.push('Hors ligne');
+  if (pending) parts.push(`✉️ ${pending} en attente`);
+  $('#net-status').textContent = parts.join(' · ');
+}
+
+onOutboxChange(() => {
+  updateNetStatus();
+  if (state.screen === 'settings') renderOutbox();
+});
+window.addEventListener('online', updateNetStatus);
+window.addEventListener('offline', updateNetStatus);
+
+/* ---------------- Écran toujours allumé ---------------- */
+
+let wakeLock;
+async function requestWakeLock() {
+  try {
+    if ('wakeLock' in navigator && !wakeLock) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    }
+  } catch {
+    // non supporté : utiliser Réglages > Luminosité > Verrouillage auto > Jamais
+  }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') requestWakeLock();
+});
+document.addEventListener('pointerdown', requestWakeLock, { once: true });
+
+/* ---------------- Démarrage ---------------- */
+
+$('#app-version').textContent = VERSION;
+renderHome();
+startOutboxWorker();
+startCamera();
+
+if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch((err) => console.warn('SW', err));
+  });
+}

@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>Photobooth</title>
+  <meta name="theme-color" content="#111111">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Photobooth">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Caméra en fond, partagée par l'accueil et la prise de vue -->
+  <div id="stage">
+    <div id="viewfinder">
+      <video id="video" autoplay muted playsinline></video>
+      <div id="countdown" class="hidden"></div>
+      <div id="shot-counter" class="hidden"></div>
+    </div>
+  </div>
+  <div id="flash"></div>
+
+  <!-- Accueil -->
+  <section id="screen-home" class="screen active">
+    <div class="home-top">
+      <button id="btn-gallery" class="chip">🖼️ Galerie</button>
+      <div class="top-right">
+        <span id="net-status" class="chip ghost"></span>
+        <button id="btn-settings" class="icon-btn" aria-label="Réglages">⚙️</button>
+      </div>
+    </div>
+    <div class="home-center">
+      <h1 id="home-title"></h1>
+      <p id="home-sub">Touchez pour commencer</p>
+      <div id="mode-choice" class="mode-choice">
+        <button class="big-choice" data-mode="single">
+          <span class="choice-icon">📷</span>
+          <span>1 photo</span>
+        </button>
+        <button class="big-choice" data-mode="strip">
+          <span class="choice-icon">🎞️</span>
+          <span>Bande de 4</span>
+        </button>
+      </div>
+      <button id="btn-start" class="primary huge hidden">Commencer</button>
+    </div>
+  </section>
+
+  <!-- Choix du filtre -->
+  <section id="screen-filter" class="screen">
+    <div class="filter-top">
+      <button class="chip" data-action="home">← Retour</button>
+      <span class="hint">Choisissez un filtre</span>
+      <span></span>
+    </div>
+    <div class="filter-bottom">
+      <div id="filter-list" class="filter-list"></div>
+      <button id="btn-go" class="primary huge">C'est parti !</button>
+    </div>
+  </section>
+
+  <!-- Prise de vue (overlay vide, la caméra est dans #stage) -->
+  <section id="screen-capture" class="screen"></section>
+
+  <!-- Résultat -->
+  <section id="screen-result" class="screen">
+    <div class="result-wrap">
+      <div class="result-image-box">
+        <img id="result-img" alt="Votre photo">
+      </div>
+      <div class="result-actions">
+        <h2>Super ! 🎉</h2>
+        <p class="muted">Votre photo est enregistrée.</p>
+        <button id="btn-email" class="primary huge">✉️ Recevoir par mail</button>
+        <button id="btn-retake" class="secondary">🔁 Supprimer et recommencer</button>
+        <button id="btn-done" class="secondary">✓ Terminer</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Galerie -->
+  <section id="screen-gallery" class="screen panel">
+    <header class="panel-header">
+      <button class="chip" data-action="home">← Retour</button>
+      <h2>Galerie <span id="gallery-count" class="muted"></span></h2>
+      <span></span>
+    </header>
+    <div id="gallery-grid" class="gallery-grid"></div>
+    <p id="gallery-empty" class="muted center hidden">Aucune photo pour l'instant.</p>
+  </section>
+
+  <!-- Visionneuse -->
+  <div id="viewer" class="modal hidden">
+    <div class="viewer-box">
+      <img id="viewer-img" alt="">
+      <div class="viewer-actions">
+        <button id="viewer-email" class="primary">✉️ Envoyer par mail</button>
+        <button id="viewer-share" class="secondary">📤 Partager / Enregistrer</button>
+        <button id="viewer-delete" class="danger admin-only">🗑️ Supprimer</button>
+        <button id="viewer-close" class="secondary">Fermer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Saisie email -->
+  <div id="email-modal" class="modal hidden">
+    <form id="email-form" class="dialog" autocomplete="off" novalidate>
+      <h2>Recevoir la photo par mail</h2>
+      <input id="email-input" type="text" inputmode="email" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="votre@email.com">
+      <p class="muted small">Plusieurs adresses ? Séparez-les par une virgule.</p>
+      <p id="email-error" class="error hidden"></p>
+      <div class="dialog-actions">
+        <button type="button" id="email-cancel" class="secondary">Annuler</button>
+        <button type="submit" class="primary">Envoyer</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Code PIN -->
+  <div id="pin-modal" class="modal hidden">
+    <form id="pin-form" class="dialog" autocomplete="off">
+      <h2>Code administrateur</h2>
+      <input id="pin-input" type="password" inputmode="numeric" pattern="[0-9]*" placeholder="••••">
+      <p id="pin-error" class="error hidden">Code incorrect</p>
+      <div class="dialog-actions">
+        <button type="button" id="pin-cancel" class="secondary">Annuler</button>
+        <button type="submit" class="primary">Valider</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Réglages -->
+  <section id="screen-settings" class="screen panel">
+    <header class="panel-header">
+      <button class="chip" id="settings-close">← Retour</button>
+      <h2>Réglages</h2>
+      <span></span>
+    </header>
+    <div class="settings">
+      <fieldset>
+        <legend>Événement</legend>
+        <label>Titre (accueil et photo)
+          <input data-setting="title" type="text" placeholder="Mariage de Léa & Tom">
+        </label>
+        <label>Texte sous le titre
+          <input data-setting="footer" type="text" placeholder="Merci d'être venus !">
+        </label>
+        <label class="row"><input data-setting="showDate" type="checkbox"> Afficher la date sur la photo</label>
+        <label>Date affichée (vide = aujourd'hui)
+          <input data-setting="customDate" type="text" placeholder="12 octobre 2026">
+        </label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Cadre</legend>
+        <div class="grid2">
+          <label>Couleur du cadre <input data-setting="frameColor" type="color"></label>
+          <label>Couleur du texte <input data-setting="textColor" type="color"></label>
+        </div>
+        <label>Police
+          <select data-setting="font">
+            <option value="elegant">Élégante (serif)</option>
+            <option value="modern">Moderne</option>
+            <option value="script">Manuscrite</option>
+          </select>
+        </label>
+        <button id="preview-frame" type="button" class="secondary">Voir un aperçu</button>
+        <img id="frame-preview" class="frame-preview hidden" alt="Aperçu">
+      </fieldset>
+
+      <fieldset>
+        <legend>Prise de vue</legend>
+        <label>Format
+          <select data-setting="mode">
+            <option value="choice">Au choix de l'invité</option>
+            <option value="single">Toujours 1 photo</option>
+            <option value="strip">Toujours une bande de 4</option>
+          </select>
+        </label>
+        <div class="grid2">
+          <label>Compte à rebours (s) <input data-setting="countdown" type="number" min="1" max="10"></label>
+          <label>Pause entre photos (s) <input data-setting="pause" type="number" min="0" max="10" step="0.5"></label>
+        </div>
+        <label class="row"><input data-setting="mirror" type="checkbox"> Effet miroir (comme un selfie)</label>
+        <label class="row"><input data-setting="galleryPublic" type="checkbox"> Galerie accessible aux invités</label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Envoi par mail</legend>
+        <p class="muted small">Voir le README pour créer le relais Google Apps Script (gratuit, envoi depuis votre Gmail).</p>
+        <label>URL du relais Apps Script
+          <input data-setting="scriptUrl" type="url" placeholder="https://script.google.com/macros/s/…/exec">
+        </label>
+        <label>Code secret (le même que dans le script)
+          <input data-setting="secret" type="text" autocapitalize="off">
+        </label>
+        <label>Objet du mail <input data-setting="emailSubject" type="text"></label>
+        <label>Message
+          <textarea data-setting="emailBody" rows="3"></textarea>
+        </label>
+        <button id="test-relay" type="button" class="secondary">Tester la connexion au relais</button>
+        <p id="test-relay-result" class="small"></p>
+      </fieldset>
+
+      <fieldset>
+        <legend>File d'envoi</legend>
+        <p id="outbox-summary"></p>
+        <div class="btn-row">
+          <button id="outbox-retry" type="button" class="secondary">Réessayer maintenant</button>
+          <button id="outbox-retry-errors" type="button" class="secondary">Relancer les échecs</button>
+          <button id="outbox-clear-sent" type="button" class="secondary">Vider les envoyés</button>
+        </div>
+        <ul id="outbox-list" class="outbox-list"></ul>
+      </fieldset>
+
+      <fieldset>
+        <legend>Photos</legend>
+        <p id="photos-summary" class="muted"></p>
+        <div id="export-batches" class="btn-row"></div>
+        <button id="delete-all" type="button" class="danger">Supprimer toutes les photos</button>
+      </fieldset>
+
+      <fieldset>
+        <legend>Sécurité</legend>
+        <label>Code administrateur
+          <input data-setting="pin" type="text" inputmode="numeric" pattern="[0-9]*">
+        </label>
+      </fieldset>
+      <p class="muted small center">Photobooth v<span id="app-version"></span></p>
+    </div>
+  </section>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
