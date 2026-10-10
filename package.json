@@ -1,0 +1,57 @@
+{
+  "name": "photobooth",
+  "productName": "Photobooth",
+  "version": "1.2.0",
+  "description": "Photobooth : webcam ou appareil photo reflex/hybride avec flash, filtres, cadres PNG et envoi par mail.",
+  "author": "Photobooth",
+  "main": "desktop/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis --x64 --publish never"
+  },
+  "build": {
+    "appId": "fr.photobooth.app",
+    "productName": "Photobooth",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "index.html",
+      "styles.css",
+      "manifest.webmanifest",
+      "js/**",
+      "icons/**",
+      "desktop/**",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Photobooth",
+      "artifactName": "Photobooth-Setup-${version}.exe"
+    },
+    "linux": {
+      "target": "dir"
+    },
+    "publish": null
+  },
+  "devDependencies": {
+    "electron": "44.7.0",
+    "electron-builder": "26.15.3"
+  }
+}

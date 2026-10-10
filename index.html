@@ -19,8 +19,13 @@
   <div id="stage">
     <div id="viewfinder">
       <video id="video" autoplay muted playsinline></video>
+      <canvas id="liveview" class="hidden"></canvas>
       <div id="countdown" class="hidden"></div>
       <div id="shot-counter" class="hidden"></div>
+      <div id="processing" class="hidden">
+        <div class="spinner"></div>
+        <p>Développement de vos photos…</p>
+      </div>
     </div>
   </div>
   <div id="flash"></div>
@@ -197,6 +202,17 @@
 
       <fieldset>
         <legend>Prise de vue</legend>
+        <label>Caméra
+          <select id="camera-select"></select>
+        </label>
+        <p id="camera-hint" class="muted small"></p>
+        <div id="dslr-settings" class="desktop-only hidden">
+          <label>Adresse de digiCamControl
+            <input data-setting="dccUrl" type="url" placeholder="http://127.0.0.1:5513">
+          </label>
+          <button id="test-camera" type="button" class="secondary">Tester l'appareil photo</button>
+          <p id="test-camera-result" class="small"></p>
+        </div>
         <label>Format
           <select data-setting="mode">
             <option value="choice">Au choix de l'invité</option>
@@ -245,6 +261,23 @@
         <p id="photos-summary" class="muted"></p>
         <div id="export-batches" class="btn-row"></div>
         <button id="delete-all" type="button" class="danger">Supprimer toutes les photos</button>
+      </fieldset>
+
+      <fieldset class="desktop-only">
+        <legend>Ordinateur</legend>
+        <label>Dossier des photos (une copie JPEG de chaque photo)
+          <span class="folder-row">
+            <input id="photo-folder" type="text" readonly>
+            <button id="choose-folder" type="button" class="secondary">Changer…</button>
+          </span>
+        </label>
+        <p class="muted small">Les originaux de l'appareil photo sont rangés dans le sous-dossier « originaux ».</p>
+        <div class="btn-row">
+          <button id="open-folder" type="button" class="secondary">📂 Ouvrir le dossier</button>
+        </div>
+        <label class="row"><input id="kiosk-toggle" type="checkbox"> Plein écran (mode kiosque)</label>
+        <p class="muted small">Gros bouton USB ou clavier : Entrée ou Espace lance la séance puis la photo. Au choix du format : touche 1 (1 photo) ou 4 (bande).</p>
+        <button id="quit-app" type="button" class="danger">Quitter l'application</button>
       </fieldset>
 
       <fieldset>

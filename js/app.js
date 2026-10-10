@@ -5,12 +5,13 @@ import {
   grabFrame, composeSingle, composeStrip, composeWithFrame, makeThumb, toBlob, sampleFrame, STRIP_ASPECT,
 } from './compose.js';
 import { saveFrame, removeFrame, loadFrames, getFrame, frameSlots, describeFrame } from './frames.js';
+import { initCamera, selectCamera, getCamera, listCameras, desktop, DSLR_ID } from './camera.js';
 import {
   enqueueEmail, parseEmails, processOutbox, startOutboxWorker, onOutboxChange,
   getOutbox, retryErrors, clearSent, testRelay,
 } from './outbox.js';
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 const IDLE_TIMEOUT_MS = 90000;
 const EXPORT_BATCH = 25;
 
@@ -18,6 +19,7 @@ const $ = (sel) => document.querySelector(sel);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const video = $('#video');
+const liveCanvas = $('#liveview');
 const viewfinder = $('#viewfinder');
 
 const state = {
@@ -25,18 +27,22 @@ const state = {
   mode: 'single',
   filterId: 'none',
   busy: false,
+  starting: false,
   shotIndex: 0,
   lastPhotoId: null,
   emailTargetId: null,
   viewerPhotoId: null,
-  stream: null,
 };
+
+let desktopInfo = null;
 
 /* ---------------- Navigation ---------------- */
 
 function showScreen(name) {
   state.screen = name;
   document.querySelectorAll('.screen').forEach((s) => s.classList.toggle('active', s.id === `screen-${name}`));
+  const cam = getCamera();
+  if (name !== 'filter' && name !== 'capture' && !(name === 'home' && cam.showOnHome)) cam.release();
   if (name === 'home') {
     document.body.classList.remove('admin');
     renderHome();
@@ -70,23 +76,21 @@ function toast(msg, ms = 4000) {
   toastTimer = setTimeout(() => t.classList.add('hidden'), ms);
 }
 
+function hideToast() {
+  clearTimeout(toastTimer);
+  $('#toast').classList.add('hidden');
+}
+
 /* ---------------- Caméra ---------------- */
 
-async function startCamera() {
-  if (state.stream && state.stream.active) return true;
+async function ensureCamera() {
   try {
-    state.stream = await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: { facingMode: 'user', width: { ideal: 1920 }, height: { ideal: 1440 } },
-    });
-    video.srcObject = state.stream;
-    await video.play().catch(() => {});
-    if (!video.videoWidth) await new Promise((r) => video.addEventListener('loadedmetadata', r, { once: true }));
+    await getCamera().start();
     layoutViewfinder();
     return true;
   } catch (err) {
     console.error(err);
-    toast("Impossible d'accéder à la caméra. Autorisez-la dans Réglages > Safari > Caméra.", 8000);
+    toast(err.message || String(err), 8000);
     return false;
   }
 }
@@ -104,7 +108,8 @@ function shotAspect(mode, i) {
 function currentAspect() {
   const shot = state.screen !== 'home' && shotAspect(state.mode, state.shotIndex);
   if (shot) return shot;
-  if (video.videoWidth && video.videoHeight) return video.videoWidth / video.videoHeight;
+  const cam = getCamera();
+  if (cam.width && cam.height) return cam.width / cam.height;
   return window.innerWidth / window.innerHeight;
 }
 
@@ -123,10 +128,14 @@ function layoutViewfinder() {
 }
 window.addEventListener('resize', layoutViewfinder);
 video.addEventListener('resize', layoutViewfinder);
+liveCanvas.addEventListener('resize', layoutViewfinder);
 
 function applyLiveSettings() {
-  video.classList.toggle('mirror', settings.mirror);
-  video.style.filter = state.screen === 'home' ? 'none' : cssFilter(getFilter(state.filterId));
+  const filter = state.screen === 'home' ? 'none' : cssFilter(getFilter(state.filterId));
+  [video, liveCanvas].forEach((el) => {
+    el.classList.toggle('mirror', settings.mirror);
+    el.style.filter = filter;
+  });
 }
 
 /* ---------------- Sons ---------------- */
@@ -176,19 +185,34 @@ function renderHome() {
   $('#btn-start').classList.toggle('hidden', choice);
   $('#home-sub').textContent = choice ? 'Choisissez votre format' : 'Touchez pour commencer';
   $('#btn-gallery').classList.toggle('hidden', !settings.galleryPublic);
+  document.body.classList.toggle('no-home-preview', !getCamera().showOnHome);
   applyLiveSettings();
   updateNetStatus();
 }
 
 async function begin(mode) {
+  if (state.starting || state.busy) return;
+  state.starting = true;
   unlockAudio();
-  if (!(await startCamera())) return;
-  state.mode = mode;
-  state.shotIndex = 0;
-  state.filterId = 'none';
-  renderFilterList();
-  showScreen('filter');
-  applyLiveSettings();
+  // L'appareil photo met quelques secondes à lancer son live view.
+  let slowShown = false;
+  const slow = setTimeout(() => {
+    slowShown = true;
+    toast("Préparation de l'appareil photo…", 15000);
+  }, 600);
+  try {
+    if (!(await ensureCamera())) return;
+    if (slowShown) hideToast();
+    state.mode = mode;
+    state.shotIndex = 0;
+    state.filterId = 'none';
+    renderFilterList();
+    showScreen('filter');
+    applyLiveSettings();
+  } finally {
+    clearTimeout(slow);
+    state.starting = false;
+  }
 }
 
 document.querySelectorAll('.big-choice').forEach((btn) => {
@@ -196,9 +220,29 @@ document.querySelectorAll('.big-choice').forEach((btn) => {
 });
 $('#btn-start').addEventListener('click', () => begin(settings.mode));
 $('#screen-home').addEventListener('click', (e) => {
+  if (e.target.closest('button')) return;
   // Toucher n'importe où démarre quand le format est imposé.
-  if (settings.mode !== 'choice' && !e.target.closest('button')) begin(settings.mode);
-  else if (!e.target.closest('button')) startCamera();
+  if (settings.mode !== 'choice') begin(settings.mode);
+  else if (getCamera().showOnHome) ensureCamera();
+});
+
+// Gros bouton USB ou clavier : Entrée / Espace lance la séance, puis la photo.
+document.addEventListener('keydown', (e) => {
+  if (e.target.closest('input, textarea, select') || document.querySelector('.modal:not(.hidden)')) return;
+  if (state.screen === 'home' && settings.mode === 'choice' && (e.key === '1' || e.key === '4')) {
+    begin(e.key === '1' ? 'single' : 'strip');
+    return;
+  }
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const actions = {
+    home: settings.mode !== 'choice' ? () => begin(settings.mode) : null,
+    filter: runCapture,
+    result: () => showScreen('home'),
+  };
+  const action = actions[state.screen];
+  if (!action) return;
+  e.preventDefault();
+  action();
 });
 document.querySelectorAll('[data-action="home"]').forEach((b) => b.addEventListener('click', () => showScreen('home')));
 
@@ -240,9 +284,10 @@ function markSelectedFilter() {
 }
 
 function drawFilterPreviews() {
-  if (!video.videoWidth) return;
-  const vw = video.videoWidth;
-  const vh = video.videoHeight;
+  const cam = getCamera();
+  if (!cam.width || !cam.height) return;
+  const vw = cam.width;
+  const vh = cam.height;
   const ar = 4 / 3;
   let sw = vw;
   let sh = vw / ar;
@@ -257,7 +302,7 @@ function drawFilterPreviews() {
       ctx.translate(c.width, 0);
       ctx.scale(-1, 1);
     }
-    ctx.drawImage(video, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, c.width, c.height);
+    ctx.drawImage(cam.el, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, c.width, c.height);
     ctx.restore();
   });
 }
@@ -266,16 +311,25 @@ $('#btn-go').addEventListener('click', runCapture);
 
 /* ---------------- Prise de vue ---------------- */
 
+function flashScreen() {
+  const flash = $('#flash');
+  flash.classList.remove('go');
+  void flash.offsetWidth;
+  flash.classList.add('go');
+}
+
 async function runCapture() {
-  if (state.busy) return;
+  if (state.busy || state.starting) return;
   state.busy = true;
+  const cam = getCamera();
   const filter = getFilter(state.filterId);
   const shots = state.mode === 'strip' ? 4 : 1;
   const frame = getFrame(state.mode);
   const slots = frame && frameSlots(frame, state.mode);
-  const frames = [];
+  const pending = [];
   const cd = $('#countdown');
   const counter = $('#shot-counter');
+  const processing = $('#processing');
   try {
     showScreen('capture');
     applyLiveSettings();
@@ -295,16 +349,23 @@ async function runCapture() {
         await sleep(1000);
       }
       cd.classList.add('hidden');
-      const maxWidth = slots ? Math.min(2400, slots[i].w) : 1600;
-      frames.push(grabFrame(video, currentAspect(), { mirror: settings.mirror, filter, maxWidth }));
-      shutterSound();
-      const flash = $('#flash');
-      flash.classList.remove('go');
-      void flash.offsetWidth;
-      flash.classList.add('go');
+      // La webcam copie l'image tout de suite ; l'appareil photo se déclenche
+      // (avec son flash) et rend la main dès qu'il est prêt pour la suivante.
+      const shot = cam.capture();
+      if (cam.kind === 'webcam') shutterSound();
+      flashScreen();
+      pending.push((await shot).image);
       if (i < shots - 1) await sleep(Math.max(0, Number(settings.pause) || 0) * 1000 + 300);
     }
     counter.classList.add('hidden');
+    processing.classList.remove('hidden');
+    const images = await Promise.all(pending);
+    const frames = images.map((img, i) => grabFrame(img, shotAspect(state.mode, i) || img.width / img.height, {
+      mirror: settings.mirror,
+      filter,
+      maxWidth: slots ? Math.min(2400, slots[i].w) : 2400,
+    }));
+    images.forEach((img) => img.source.close && img.source.close());
     let final;
     if (frame) final = composeWithFrame(frames, frame, slots, settings);
     else final = shots > 1 ? composeStrip(frames, settings) : composeSingle(frames[0], settings);
@@ -313,22 +374,41 @@ async function runCapture() {
       createdAt: Date.now(),
       mode: state.mode,
       filter: filter.id,
-      blob: await toBlob(final, 0.9),
+      blob: await toBlob(final, 0.92),
       thumb: await toBlob(makeThumb(final), 0.8),
     };
+    if (desktop) photo.filePath = await saveToFolder(photo);
     await db.put('photos', photo);
     state.lastPhotoId = photo.id;
     showResult(photo);
   } catch (err) {
     console.error(err);
-    toast(`Oups, la photo a échoué : ${err.message || err}`);
+    toast(`Oups, la photo a échoué : ${err.message || err}`, 8000);
     showScreen('home');
   } finally {
     state.busy = false;
     state.shotIndex = 0;
     cd.classList.add('hidden');
     counter.classList.add('hidden');
+    processing.classList.add('hidden');
   }
+}
+
+// Application Windows : chaque photo est aussi enregistrée en JPEG dans un dossier.
+async function saveToFolder(photo) {
+  try {
+    const bytes = new Uint8Array(await photo.blob.arrayBuffer());
+    return await desktop.savePhoto(bytes, `photobooth-${fileStamp(photo.createdAt)}.jpg`);
+  } catch (err) {
+    toast(`Photo non copiée dans le dossier : ${err.message || err}`, 6000);
+    return null;
+  }
+}
+
+function fileStamp(ts) {
+  const d = new Date(ts);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}`;
 }
 
 /* ---------------- Résultat ---------------- */
@@ -430,7 +510,16 @@ $('#viewer-email').addEventListener('click', () => {
 });
 $('#viewer-share').addEventListener('click', async () => {
   const photo = await db.get('photos', state.viewerPhotoId);
-  if (photo) await sharePhotos([photo]);
+  if (!photo) return;
+  if (!desktop) {
+    await sharePhotos([photo]);
+    return;
+  }
+  if (!photo.filePath) {
+    photo.filePath = await saveToFolder(photo);
+    if (photo.filePath) await db.put('photos', photo);
+  }
+  if (photo.filePath) desktop.showInFolder(photo.filePath).catch((err) => toast(err.message));
 });
 $('#viewer-delete').addEventListener('click', async () => {
   if (!confirm('Supprimer cette photo ?')) return;
@@ -441,8 +530,7 @@ $('#viewer-delete').addEventListener('click', async () => {
 });
 
 function photoFile(p) {
-  const stamp = new Date(p.createdAt).toISOString().slice(0, 19).replace(/[:T]/g, '-');
-  return new File([p.blob], `photobooth-${stamp}.jpg`, { type: 'image/jpeg' });
+  return new File([p.blob], `photobooth-${fileStamp(p.createdAt)}.jpg`, { type: 'image/jpeg' });
 }
 
 async function sharePhotos(photos) {
@@ -498,6 +586,8 @@ function openSettings() {
   renderSettingsStats();
   renderOutbox();
   renderFrameUploads();
+  renderCameraSelect();
+  renderDesktopSettings();
   showScreen('settings');
   document.body.classList.add('admin');
 }
@@ -511,8 +601,80 @@ document.querySelectorAll('[data-setting]').forEach((el) => {
     if (key === 'pin' && !settings.pin) settings.pin = '0000';
     saveSettings();
     if (key === 'scriptUrl' || key === 'secret') processOutbox();
+    if (key === 'dccUrl') configureDesktop();
   });
 });
+
+async function renderCameraSelect() {
+  const select = $('#camera-select');
+  const cameras = await listCameras();
+  select.innerHTML = '';
+  select.append(new Option(desktop ? 'Webcam par défaut' : 'Caméra avant (par défaut)', ''));
+  cameras.forEach((c) => select.append(new Option(c.label, c.id)));
+  select.value = cameras.some((c) => c.id === settings.cameraId) ? settings.cameraId : '';
+  $('#camera-hint').textContent = settings.cameraId === DSLR_ID
+    ? "digiCamControl doit être lancé, avec le serveur web activé, avant la séance (voir le README). L'appareil se déclenche avec son flash."
+    : '';
+  $('#dslr-settings').classList.toggle('hidden', settings.cameraId !== DSLR_ID);
+}
+
+$('#camera-select').addEventListener('change', async (e) => {
+  settings.cameraId = e.target.value;
+  saveSettings();
+  const cam = selectCamera();
+  if (cam.kind === 'webcam') cam.stop();
+  renderCameraSelect();
+  $('#test-camera-result').textContent = '';
+  if (cam.showOnHome) ensureCamera();
+});
+
+async function configureDesktop() {
+  if (!desktop) return;
+  try {
+    desktopInfo = await desktop.configure({ dccUrl: settings.dccUrl, photoFolder: settings.photoFolder });
+  } catch (err) {
+    toast(err.message || String(err));
+  }
+}
+
+function renderDesktopSettings() {
+  if (!desktop || !desktopInfo) return;
+  $('#photo-folder').value = desktopInfo.photoFolder;
+  $('#kiosk-toggle').checked = desktopInfo.kiosk;
+}
+
+if (desktop) {
+  $('#test-camera').addEventListener('click', async () => {
+    const out = $('#test-camera-result');
+    out.style.color = '';
+    out.textContent = 'Recherche de l\'appareil…';
+    try {
+      await configureDesktop(); // prend en compte une adresse tout juste modifiée
+      const { cameras } = await desktop.camera.test();
+      out.style.color = 'var(--ok)';
+      out.textContent = `Appareil détecté ✅ (n° ${cameras.join(', ')})`;
+    } catch (err) {
+      out.style.color = 'var(--danger)';
+      out.textContent = err.message || String(err);
+    }
+  });
+  $('#choose-folder').addEventListener('click', async () => {
+    const dir = await desktop.chooseFolder().catch((err) => toast(err.message));
+    if (!dir) return;
+    settings.photoFolder = dir;
+    saveSettings();
+    await configureDesktop();
+    renderDesktopSettings();
+  });
+  $('#open-folder').addEventListener('click', () => desktop.openFolder().catch((err) => toast(err.message)));
+  $('#kiosk-toggle').addEventListener('change', async (e) => {
+    await desktop.setKiosk(e.target.checked);
+    await configureDesktop();
+  });
+  $('#quit-app').addEventListener('click', () => {
+    if (confirm('Quitter le photobooth ?')) desktop.quit();
+  });
+}
 
 $('#settings-close').addEventListener('click', () => showScreen('home'));
 
@@ -602,7 +764,7 @@ $('#test-relay').addEventListener('click', async () => {
 });
 
 $('#outbox-retry').addEventListener('click', async () => {
-  if (!navigator.onLine) toast("L'iPad est hors ligne.");
+  if (!navigator.onLine) toast(desktop ? "L'ordinateur est hors ligne." : "L'iPad est hors ligne.");
   else if (!settings.scriptUrl) toast("Renseignez d'abord l'URL du relais.");
   await processOutbox();
 });
@@ -633,9 +795,19 @@ async function renderOutbox() {
 
 async function renderSettingsStats() {
   const photos = (await db.all('photos')).sort((a, b) => a.createdAt - b.createdAt);
-  $('#photos-summary').textContent = `${photos.length} photo(s) enregistrée(s) sur l'iPad.`;
   const box = $('#export-batches');
   box.innerHTML = '';
+  if (desktop) {
+    $('#photos-summary').textContent = `${photos.length} photo(s). Chaque photo est aussi enregistrée en JPEG dans le dossier des photos.`;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'secondary';
+    btn.textContent = '📂 Ouvrir le dossier des photos';
+    btn.addEventListener('click', () => desktop.openFolder().catch((err) => toast(err.message)));
+    box.append(btn);
+    return;
+  }
+  $('#photos-summary').textContent = `${photos.length} photo(s) enregistrée(s) sur l'iPad.`;
   for (let i = 0; i < photos.length; i += EXPORT_BATCH) {
     const batch = photos.slice(i, i + EXPORT_BATCH);
     const btn = document.createElement('button');
@@ -651,7 +823,8 @@ async function renderSettingsStats() {
 
 $('#delete-all').addEventListener('click', async () => {
   if (!confirm('Supprimer définitivement TOUTES les photos ?')) return;
-  if (!confirm('Vraiment sûr ? Les mails encore en attente ne pourront plus partir.')) return;
+  const extra = desktop ? ' Les fichiers déjà copiés dans le dossier des photos sont conservés.' : '';
+  if (!confirm(`Vraiment sûr ? Les mails encore en attente ne pourront plus partir.${extra}`)) return;
   await db.clear('photos');
   renderSettingsStats();
   toast('Toutes les photos ont été supprimées.');
@@ -695,14 +868,19 @@ document.addEventListener('pointerdown', requestWakeLock, { once: true });
 /* ---------------- Démarrage ---------------- */
 
 $('#app-version').textContent = VERSION;
+document.body.classList.toggle('desktop', Boolean(desktop));
+if (desktop) $('#viewer-share').textContent = '📂 Afficher dans le dossier';
+initCamera(video, liveCanvas);
 renderHome();
 loadFrames().catch((err) => console.warn('Cadres', err));
+configureDesktop();
 startOutboxWorker();
-startCamera();
+if (getCamera().showOnHome) ensureCamera();
 
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
 
-if ('serviceWorker' in navigator) {
+// Le cache hors ligne ne sert qu'à la version web (iPad).
+if (!desktop && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('sw.js').catch((err) => console.warn('SW', err));
   });

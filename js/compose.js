@@ -8,29 +8,30 @@ const FONTS = {
   script: { title: '{s}px "Snell Roundhand", "Brush Script MT", "Segoe Script", cursive', sub: 'italic {s}px Georgia, serif' },
 };
 
-// Capture l'image courante de la vidéo, recadrée au centre au ratio demandé.
-export function grabFrame(video, aspect, { mirror, filter, maxWidth = 1600 }) {
-  const vw = video.videoWidth;
-  const vh = video.videoHeight;
-  let sw = vw;
-  let sh = vw / aspect;
-  if (sh > vh) {
-    sh = vh;
-    sw = vh * aspect;
+// Recadre une image (webcam ou appareil photo) au centre, au ratio demandé,
+// puis applique le miroir et le filtre.
+export function grabFrame(image, aspect, { mirror, filter, maxWidth = 2400 }) {
+  const { source, width: iw, height: ih } = image;
+  let sw = iw;
+  let sh = iw / aspect;
+  if (sh > ih) {
+    sh = ih;
+    sw = ih * aspect;
   }
-  const sx = (vw - sw) / 2;
-  const sy = (vh - sh) / 2;
+  const sx = (iw - sw) / 2;
+  const sy = (ih - sh) / 2;
   const w = Math.round(Math.min(sw, maxWidth));
   const h = Math.round(w / aspect);
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.imageSmoothingQuality = 'high';
   if (mirror) {
     ctx.translate(w, 0);
     ctx.scale(-1, 1);
   }
-  ctx.drawImage(video, sx, sy, sw, sh, 0, 0, w, h);
+  ctx.drawImage(source, sx, sy, sw, sh, 0, 0, w, h);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   applyFilter(ctx, w, h, filter);
   return canvas;
