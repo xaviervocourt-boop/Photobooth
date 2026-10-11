@@ -1,7 +1,7 @@
 import { db, uid } from './db.js';
 import { settings, saveSettings, DEFAULTS } from './settings.js';
 import {
-  grabFrame, composeSingle, composeStrip, composeWithFrame, makeThumb, toBlob, sampleFrame, STRIP_ASPECT,
+  grabFrame, composeSingle, composeStrip, composeWithFrame, frameScale, makeThumb, toBlob, sampleFrame, STRIP_ASPECT,
 } from './compose.js';
 import { saveFrame, removeFrame, loadFrames, getFrame, frameSlots, describeFrame } from './frames.js';
 import { initCamera, selectCamera, getCamera, listWebcams, webcamLabel, desktop, DSLR_ID } from './camera.js';
@@ -11,7 +11,7 @@ import {
   getOutbox, retryErrors, clearSent, testRelay,
 } from './outbox.js';
 
-const VERSION = '1.3.0';
+const VERSION = '1.3.1';
 const IDLE_TIMEOUT_MS = 90000;
 const EXPORT_BATCH = 25;
 
@@ -297,7 +297,7 @@ async function runCapture() {
     const images = await Promise.all(pending);
     const frames = images.map((img, i) => grabFrame(img, shotAspect(state.mode, i) || img.width / img.height, {
       mirror: settings.mirror,
-      maxWidth: slots ? Math.min(3000, slots[i].w) : 3000,
+      maxWidth: slots ? Math.min(3600, Math.round(slots[i].w * frameScale(frame))) : 3000,
     }));
     images.forEach((img) => img.source.close && img.source.close());
     let final;

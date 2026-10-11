@@ -24,7 +24,7 @@ Un photobooth complet, en deux versions qui partagent le même code :
 4. Dans l'app, ouvrez les réglages (⚙️), section **Cadre**, puis **Choisir un PNG**. L'app indique combien de zones elle a trouvées. **Voir un aperçu** montre le résultat.
 
 Conseils :
-- La photo finale fait la taille de votre PNG. Visez au moins **1800 px** de large pour un cadre « 1 photo », et environ **1200 × 3600 px** pour une bande.
+- Visez au moins **1800 px** de large pour un cadre « 1 photo », et environ **1200 × 3600 px** pour une bande. Un cadre plus petit est agrandi automatiquement pour que les photos gardent la qualité de l'appareil, mais le cadre lui-même peut alors paraître flou.
 - Le ratio de chaque zone transparente décide du cadrage de la caméra : une zone 4:3 ou 3:2 rend mieux qu'une zone très allongée.
 - Les formes arrondies ou fantaisie marchent : la photo est placée sous le PNG, qui la découpe.
 - Avec un cadre PNG, le titre, le texte et la date des réglages ne sont pas ajoutés : mettez-les directement dans votre design.

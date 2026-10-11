@@ -120,9 +120,12 @@ export function frameSlots(frame, mode) {
 export function describeFrame(frame, mode) {
   const n = frame.holes.length;
   const expected = FRAME_SLOTS[mode];
+  const small = Math.max(frame.width, frame.height) < 1800
+    ? ' Cadre petit : il sera agrandi pour garder la qualité des photos, mais peut paraître flou (visez au moins 1800 px).'
+    : '';
   const base = `${frame.width} × ${frame.height} px · ${n} zone${n > 1 ? 's' : ''} transparente${n > 1 ? 's' : ''}`;
-  if (n === 0) return { text: `${base}. La photo remplira toute l'image, avec le cadre par-dessus.`, warn: true };
-  if (n < expected) return { text: `${base}. ${expected} attendues : certaines photos seront répétées.`, warn: true };
-  if (n > expected) return { text: `${base}. Seules les ${expected} premières seront utilisées.`, warn: true };
-  return { text: `${base} ✓`, warn: false };
+  if (n === 0) return { text: `${base}. La photo remplira toute l'image, avec le cadre par-dessus.${small}`, warn: true };
+  if (n < expected) return { text: `${base}. ${expected} attendues : certaines photos seront répétées.${small}`, warn: true };
+  if (n > expected) return { text: `${base}. Seules les ${expected} premières seront utilisées.${small}`, warn: true };
+  return { text: `${base} ✓${small}`, warn: Boolean(small) };
 }

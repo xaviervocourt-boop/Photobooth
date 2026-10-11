@@ -119,15 +119,23 @@ export function composeStrip(frames, s) {
 }
 
 // Cadre PNG personnalisé : photos dans les zones transparentes, PNG par-dessus.
+// Un cadre PNG exporté petit ne doit pas réduire la photo de l'appareil :
+// la mise en page est agrandie jusqu'à 3600 px sur le grand côté (×3 au plus).
+export function frameScale(frame) {
+  return Math.min(3, Math.max(1, 3600 / Math.max(frame.width, frame.height)));
+}
+
 export function composeWithFrame(frames, frame, slots, s) {
+  const k = frameScale(frame);
   const canvas = document.createElement('canvas');
-  canvas.width = frame.width;
-  canvas.height = frame.height;
+  canvas.width = Math.round(frame.width * k);
+  canvas.height = Math.round(frame.height * k);
   const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
   ctx.fillStyle = s.frameColor;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   frames.forEach((f, i) => {
-    const slot = slots[i];
+    const slot = { x: slots[i].x * k, y: slots[i].y * k, w: slots[i].w * k, h: slots[i].h * k };
     // Recadrage centré si le ratio diffère légèrement de la zone.
     const ar = slot.w / slot.h;
     let sw = f.width;
@@ -138,7 +146,7 @@ export function composeWithFrame(frames, frame, slots, s) {
     }
     ctx.drawImage(f, (f.width - sw) / 2, (f.height - sh) / 2, sw, sh, slot.x, slot.y, slot.w, slot.h);
   });
-  ctx.drawImage(frame.img, 0, 0, frame.width, frame.height);
+  ctx.drawImage(frame.img, 0, 0, canvas.width, canvas.height);
   return canvas;
 }
 
