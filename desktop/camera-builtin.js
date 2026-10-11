@@ -326,8 +326,9 @@ async function probe(how) {
   child = null;
   mode = how;
   try {
-    const info = await call('ping');
+    // Liaison USB d'abord, comme la connexion au lancement de l'application.
     const result = await call('selftest');
+    const info = await call('ping');
     return { mode: child ? child.mode : how, ...info, ...result };
   } finally {
     if (child) stop(child);

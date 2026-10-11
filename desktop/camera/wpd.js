@@ -93,10 +93,14 @@ let P = null;
 function init() {
   if (api) return;
   const ole32 = koffi.load('ole32.dll');
+  const kernel32 = koffi.load('kernel32.dll');
   api = {
     CoInitializeEx: ole32.func('int32 __stdcall CoInitializeEx(void *reserved, uint32 coinit)'),
     CoCreateInstance: ole32.func('int32 __stdcall CoCreateInstance(PB_GUID *clsid, void *outer, uint32 ctx, PB_GUID *iid, _Out_ void **obj)'),
     CoTaskMemFree: ole32.func('void __stdcall CoTaskMemFree(void *ptr)'),
+    // Copie de la mémoire Windows dans un Buffer : les vues sur de la mémoire
+    // externe (koffi.view) font planter les processus Electron.
+    RtlMoveMemory: kernel32.func('void __stdcall RtlMoveMemory(void *dst, void *src, size_t len)'),
   };
   const proto = (decl) => koffi.proto(decl);
   P = {
@@ -199,7 +203,8 @@ function getBuffer(v, k) {
   const ptr = [null];
   const size = [0];
   if (vcall(v, V.GetBufferValue, P.GetBuffer, k, ptr, size) < 0 || !ptr[0]) return Buffer.alloc(0);
-  const buf = size[0] ? Buffer.from(koffi.view(ptr[0], size[0])) : Buffer.alloc(0);
+  const buf = Buffer.allocUnsafeSlow(size[0]);
+  if (size[0]) api.RtlMoveMemory(buf, ptr[0], size[0]);
   api.CoTaskMemFree(ptr[0]);
   return buf;
 }

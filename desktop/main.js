@@ -249,8 +249,6 @@ async function selfTest(file) {
       return false;
     }
   };
-  // Même vérification dans le processus principal, pour situer un éventuel souci.
-  await step('main', () => require('./camera/wpd').selfTest());
   // Lancement normal (processus utilitaire, avec repli en mode Node), puis mode Node seul.
   result.ok = await step('driver', () => builtin.probe('utility'));
   await step('nodeMode', () => builtin.probe('node'));
