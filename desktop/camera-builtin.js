@@ -5,6 +5,7 @@
 'use strict';
 
 const { app, utilityProcess } = require('electron');
+const childProcess = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -20,6 +21,7 @@ const TIMEOUT_MS = {
   'set-setting': 10000,
   disconnect: 4000,
   selftest: 30000,
+  ping: 15000,
 };
 const LOG_MAX_BYTES = 2 * 1024 * 1024;
 
@@ -27,7 +29,6 @@ class CameraError extends Error {}
 
 let child = null;
 let seq = 0;
-const calls = new Map();
 let wantLive = false;
 let frameRequest = null;
 
@@ -35,6 +36,7 @@ let frameRequest = null;
 
 let logStream = null;
 let logBytes = 0;
+const recent = []; // dernières lignes, pour l'auto-test
 
 function logFile() {
   return path.join(app.getPath('userData'), 'camera.log');
@@ -60,6 +62,8 @@ function log(line) {
       logBytes = size;
     }
     const text = `${new Date().toISOString()} ${line}\n`;
+    recent.push(line);
+    if (recent.length > 300) recent.shift();
     logBytes += Buffer.byteLength(text);
     logStream.write(text);
   } catch {
@@ -74,61 +78,135 @@ function servicePath() {
   return path.join(__dirname, 'camera', 'service.js').replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
 }
 
+// Deux façons de lancer le pilote dans un processus séparé : le processus
+// « utilitaire » d'Electron, ou l'application elle-même en mode Node. Le
+// second sert de repli si le premier ne démarre pas sur ce PC.
+let mode = process.env.PHOTOBOOTH_CAMERA_PROCESS === 'node' ? 'node' : 'utility';
+
+function spawn(how) {
+  if (how === 'utility') {
+    const p = utilityProcess.fork(servicePath(), [], { serviceName: 'Photobooth - appareil photo', stdio: 'pipe' });
+    p.on('error', (type, location) => log(`erreur du processus utilitaire : ${type} ${location || ''}`));
+    return {
+      send: (msg) => p.postMessage(msg),
+      kill: () => p.kill(),
+      onMessage: (fn) => p.on('message', fn),
+      onExit: (fn) => p.on('exit', fn),
+      streams: [p.stdout, p.stderr],
+    };
+  }
+  const p = childProcess.fork(servicePath(), [], {
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+    serialization: 'advanced', // les images passent telles quelles
+    windowsHide: true,
+  });
+  let exited = false;
+  const exitHandlers = [];
+  const exit = (code) => {
+    if (exited) return;
+    exited = true;
+    exitHandlers.forEach((fn) => fn(code));
+  };
+  p.on('exit', (code, signal) => exit(code ?? signal));
+  p.on('error', (err) => {
+    log(`lancement du pilote impossible : ${err.message}`);
+    exit(-1);
+  });
+  return {
+    send: (msg) => {
+      try {
+        p.send(msg);
+      } catch (err) {
+        log(`envoi au pilote impossible : ${err.message}`);
+      }
+    },
+    kill: () => p.kill(),
+    onMessage: (fn) => p.on('message', fn),
+    onExit: (fn) => exitHandlers.push(fn),
+    streams: [p.stdout, p.stderr],
+  };
+}
+
 function start() {
   if (child) return child;
-  const proc = utilityProcess.fork(servicePath(), [], { serviceName: 'Photobooth - appareil photo', stdio: 'pipe' });
-  const output = (stream) => stream && stream.on('data', (d) => String(d).split('\n').filter(Boolean).forEach((l) => log(`[pilote] ${l}`)));
-  output(proc.stdout);
-  output(proc.stderr);
-  proc.on('message', (msg) => {
+  const how = mode;
+  const proc = spawn(how);
+  proc.mode = how;
+  proc.calls = new Map();
+  proc.answered = false; // a déjà répondu avec succès
+  proc.killed = false; // arrêté par l'application (délai dépassé, fermeture)
+  proc.streams.forEach((stream) => stream && stream.on('data', (d) => {
+    String(d).split(/\r?\n/).filter(Boolean).forEach((l) => log(`[pilote] ${l}`));
+  }));
+  proc.onMessage((msg) => {
     if (!msg) return;
     if (msg.log) {
       log(msg.log);
       return;
     }
-    const call = calls.get(msg.id);
-    if (!call) return;
+    const entry = proc.calls.get(msg.id);
+    if (!entry) return;
     if (msg.fired) {
-      if (call.onFired) call.onFired();
+      if (entry.onFired) entry.onFired();
       return;
     }
-    calls.delete(msg.id);
-    clearTimeout(call.timer);
-    if (msg.ok) call.resolve(msg.result);
-    else call.reject(new CameraError(msg.error));
-  });
-  proc.on('exit', (code) => {
-    if (child === proc) child = null;
-    frameRequest = null;
-    log(`pilote arrêté (code ${code})`);
-    for (const [id, call] of calls) {
-      calls.delete(id);
-      clearTimeout(call.timer);
-      call.reject(new CameraError('Le pilote de l\'appareil photo s\'est arrêté : réessayez (il redémarre tout seul).'));
+    proc.calls.delete(msg.id);
+    clearTimeout(entry.timer);
+    if (msg.ok) {
+      proc.answered = true;
+      entry.resolve(msg.result);
+    } else {
+      entry.reject(new CameraError(msg.error));
     }
+  });
+  proc.onExit((code) => {
+    if (child === proc) child = null;
+    log(`pilote arrêté (code ${code})`);
+    const pending = [...proc.calls.values()];
+    proc.calls.clear();
+    pending.forEach((entry) => clearTimeout(entry.timer));
+    // Le processus utilitaire s'arrête avant d'avoir pu servir : on passe au
+    // mode Node et on refait les demandes en cours.
+    if (how === 'utility' && !proc.answered && !proc.killed) {
+      mode = 'node';
+      log('processus utilitaire indisponible : le pilote passe en mode Node');
+      pending.forEach((entry) => call(entry.cmd, entry.args, { onFired: entry.onFired }).then(entry.resolve, entry.reject));
+      return;
+    }
+    pending.forEach((entry) => entry.reject(new CameraError(
+      `Le pilote de l'appareil photo s'est arrêté (code ${code}) : réessayez (il redémarre tout seul).`,
+    )));
   });
   child = proc;
   return proc;
+}
+
+function stop(proc) {
+  proc.killed = true;
+  if (child === proc) child = null;
+  proc.kill();
 }
 
 function call(cmd, args = {}, { onFired } = {}) {
   const proc = start();
   const id = ++seq;
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      calls.delete(id);
+    const entry = { cmd, args, resolve, reject, onFired };
+    entry.timer = setTimeout(() => {
+      proc.calls.delete(id);
       reject(new CameraError(cmd === 'frame'
         ? 'Pas d\'image de l\'appareil photo.'
         : 'L\'appareil photo ne répond plus. Vérifiez le câble USB et que l\'appareil est allumé.'));
       // Les images attendent derrière une photo en cours : rien d'anormal.
       // Une autre commande bloquée : le pilote est relancé.
       if (cmd !== 'frame' && child === proc) {
-        log(`${cmd} sans réponse après ${TIMEOUT_MS[cmd]} ms : relance du pilote`);
-        proc.kill();
+        log(`${cmd} sans réponse après ${TIMEOUT_MS[cmd] || 15000} ms : relance du pilote`);
+        stop(proc);
       }
     }, TIMEOUT_MS[cmd] || 15000);
-    calls.set(id, { resolve, reject, timer, onFired });
-    proc.postMessage({ id, cmd, args });
+    proc.calls.set(id, entry);
+    proc.send({ id, cmd, args });
   });
 }
 
@@ -238,11 +316,28 @@ async function shutdown() {
   if (!child) return;
   const proc = child;
   await call('disconnect').catch(() => {});
-  if (child === proc) proc.kill();
+  stop(proc);
 }
 
-function selfTest() {
-  return call('selftest');
+// Auto-test : lance le pilote dans le mode demandé (« utility » ou « node »)
+// et vérifie la liaison avec Windows.
+async function probe(how) {
+  const saved = { child, mode };
+  child = null;
+  mode = how;
+  try {
+    const info = await call('ping');
+    const result = await call('selftest');
+    return { mode: child ? child.mode : how, ...info, ...result };
+  } finally {
+    if (child) stop(child);
+    child = saved.child;
+    mode = saved.mode;
+  }
+}
+
+function recentLog() {
+  return recent.slice();
 }
 
 function openLogPath() {
@@ -253,5 +348,5 @@ function openLogPath() {
 
 module.exports = {
   test, startLiveView, stopLiveView, proxy, trigger, fetchCapture, testShot, getSettings, setSetting, shutdown,
-  selfTest, openLogPath, log, CameraError,
+  probe, recentLog, openLogPath, log, CameraError,
 };

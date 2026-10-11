@@ -8,7 +8,18 @@ const { OP, RC, parseDeviceInfo, PtpError, hex } = require('./ptp');
 const { NikonCamera } = require('./nikon');
 const { CanonCamera } = require('./canon');
 
-const port = process.parentPort;
+// Lancé comme processus utilitaire d'Electron, ou par l'application en mode Node.
+const port = process.parentPort
+  ? {
+    postMessage: (msg) => process.parentPort.postMessage(msg),
+    listen: (fn) => process.parentPort.on('message', (e) => fn(e.data)),
+  }
+  : {
+    postMessage: (msg) => process.send(msg),
+    listen: (fn) => process.on('message', fn),
+  };
+// Application fermée : on libère l'appareil.
+if (!process.parentPort) process.on('disconnect', () => process.exit(0));
 const NOT_CONNECTED = 0x8007048f;
 
 const NO_CAMERA = 'Aucun appareil photo Nikon ou Canon détecté. Branchez-le en USB, allumez-le, '
@@ -223,6 +234,9 @@ const handlers = {
     if (!c.settingDefs()[name]) throw new PtpError('Réglage inconnu.');
     return c.setSetting(name, String(value));
   },
+  ping() {
+    return { node: process.versions.node, platform: process.platform, arch: process.arch, pid: process.pid };
+  },
   // Vérification de la mécanique Windows (lancée par la construction de l'installateur).
   selftest() {
     return require('./wpd').selfTest();
@@ -240,8 +254,8 @@ const handlers = {
   },
 };
 
-port.on('message', (e) => {
-  const { id, cmd, args } = e.data || {};
+port.listen((data) => {
+  const { id, cmd, args } = data || {};
   const handler = handlers[cmd];
   lastUse = Date.now();
   let reply;

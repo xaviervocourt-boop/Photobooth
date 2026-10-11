@@ -236,13 +236,28 @@ function registerIpc() {
 // Auto-test du pilote d'appareil photo dans l'application installée (lancé
 // par la construction de l'installateur) : résultat écrit dans un fichier.
 async function selfTest(file) {
-  let result;
-  try {
-    result = { ok: true, ...(await builtin.selfTest()) };
-  } catch (err) {
-    result = { ok: false, error: err.message || String(err) };
+  const result = {
+    ok: false,
+    versions: { app: app.getVersion(), electron: process.versions.electron, node: process.versions.node },
+  };
+  const step = async (name, fn) => {
+    try {
+      result[name] = await fn();
+      return true;
+    } catch (err) {
+      result[name] = { error: err.message || String(err) };
+      return false;
+    }
+  };
+  // Même vérification dans le processus principal, pour situer un éventuel souci.
+  await step('main', () => require('./camera/wpd').selfTest());
+  // Lancement normal (processus utilitaire, avec repli en mode Node), puis mode Node seul.
+  result.ok = await step('driver', () => builtin.probe('utility'));
+  await step('nodeMode', () => builtin.probe('node'));
+  if (!result.ok || result.driver.mode !== 'utility') {
+    await new Promise((r) => setTimeout(r, 500)); // dernières lignes du pilote
+    result.log = builtin.recentLog();
   }
-  result.versions = { app: app.getVersion(), electron: process.versions.electron, node: process.versions.node };
   await fsp.writeFile(file, JSON.stringify(result, null, 2));
   await builtin.shutdown().catch(() => {});
   app.exit(0);
