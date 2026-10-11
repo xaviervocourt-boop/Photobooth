@@ -1,7 +1,7 @@
 {
   "name": "photobooth",
   "productName": "Photobooth",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Photobooth : webcam ou appareil photo Nikon / Canon avec flash, cadres PNG et envoi par mail.",
   "author": "Photobooth",
   "main": "desktop/main.js",

@@ -113,7 +113,7 @@ class DslrSource {
       const started = performance.now();
       try {
         const res = await fetch(`${LIVEVIEW_URL}?t=${Date.now()}`, { cache: 'no-store' });
-        if (res.ok) {
+        if (res.status === 200) { // 204 : pas d'image pour l'instant
           const bitmap = await createImageBitmap(await res.blob());
           if (this.el.width !== bitmap.width || this.el.height !== bitmap.height) {
             this.el.width = bitmap.width;
@@ -199,6 +199,14 @@ export function getCamera() {
 export function webcamLabel() {
   const track = webcam && webcam.stream && webcam.stream.getVideoTracks()[0];
   return track ? track.label : '';
+}
+
+// Appareil photo vu par Windows comme une webcam (mode USB « UVC/UAC » du
+// Nikon Zf, utilitaire webcam…) : le pilote ne peut alors pas le piloter.
+export async function webcamModeCamera() {
+  const cams = await listWebcams();
+  const cam = cams.find((c) => /nikon|canon|\beos\b|\bz ?f\b|\bz ?(5|6|7|8|9|30|50)\b/i.test(c.label));
+  return cam ? cam.label : '';
 }
 
 // Webcams et flux vidéo pour les réglages (les noms n'apparaissent qu'après autorisation).

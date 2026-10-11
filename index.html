@@ -208,16 +208,22 @@
           </div>
           <h3 class="subhead">Réglages de l'appareil</h3>
           <p class="muted small">Mode M (manuel) conseillé : l'ouverture et la vitesse ne se règlent que si la molette de l'appareil le permet.</p>
+          <div class="cam-preview">
+            <canvas id="cam-preview" class="hidden"></canvas>
+            <button id="cam-preview-toggle" type="button" class="secondary">👁 Voir le live view</button>
+          </div>
           <div class="cam-settings">
             <label>Ouverture (diaphragme) <select data-cam="aperture" disabled></select></label>
             <label>Vitesse (obturateur) <select data-cam="shutterspeed" disabled></select></label>
             <label>ISO <select data-cam="iso" disabled></select></label>
             <label>Balance des blancs <select data-cam="whitebalance" disabled></select></label>
             <label>Qualité d'image <select data-cam="compressionsetting" disabled></select></label>
+            <label>Live view : effet des réglages <select data-cam="liveview" disabled></select></label>
           </div>
           <div class="btn-row">
             <button id="cam-refresh" type="button" class="secondary">↻ Relire les réglages de l'appareil</button>
-            <button id="cam-log" type="button" class="secondary hidden">📋 Journal de l'appareil</button>
+            <button id="cam-log" type="button" class="secondary hidden">📄 Journal de l'appareil</button>
+            <button id="cam-report" type="button" class="secondary hidden">📋 Copier le rapport</button>
           </div>
           <p id="cam-status" class="small muted"></p>
         </div>

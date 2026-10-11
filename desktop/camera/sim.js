@@ -68,9 +68,11 @@ function nikon(options) {
     0x5005: { type: DT.UINT16, cur: 2, values: [2, 4, 0x8010, 0x8011, 6, 5, 7] },
     0x5004: { type: DT.UINT8, cur: 4, values: [0, 2, 4, 5, 7, 12] },
     0xd10b: { type: DT.UINT8, cur: 0, values: [0, 1] },
+    0xd17b: { type: DT.UINT8, cur: 0, values: [0, 1] },
+    0xd1ac: { type: DT.UINT8, cur: 2, values: [1, 2, 3] },
   };
   const ops = [0x1001, 0x1008, 0x1009, 0x100b, 0x1014, 0x1015, 0x1016, 0x90c1, 0x90c7, 0x90c8, 0x9201, 0x9202, 0x9203, 0x9207, 0x941c];
-  const info = deviceInfo(0x0a, 'Nikon Corporation', 'Z 6_2', ops, [...Object.keys(props).map(Number), 0xd1a2, 0xd1a4]);
+  const info = deviceInfo(0x0a, 'Nikon Corporation', options.zf ? 'Z f' : 'Z 6_2', ops, [...Object.keys(props).map(Number), 0xd1a2, 0xd1a4]);
   let lv = 0;
   let frame = 0;
   let busy = 0;
@@ -299,10 +301,12 @@ function canon(options) {
   };
 }
 
-// « nikon », « canon », « canon1000d », options après « : » (ex. nikon:prohibit,lock).
+// « nikon », « canon », « canon1000d », options après « : » (ex. nikon:zf,prohibit,lock).
+// « none » : aucun appareil branché (renvoie null).
 function createSimulator(spec) {
   const [name, opts = ''] = String(spec).split(':');
   const options = Object.fromEntries(opts.split(',').filter(Boolean).map((o) => [o, true]));
+  if (name === 'none') return null;
   if (name === 'nikon') return nikon(options);
   if (name === 'canon1000d') return canon({ ...options, model: 'Canon EOS 1000D' });
   return canon(options);

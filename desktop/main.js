@@ -4,7 +4,7 @@
 'use strict';
 
 const {
-  app, BrowserWindow, Menu, dialog, ipcMain, powerSaveBlocker, protocol, session, shell,
+  app, BrowserWindow, Menu, clipboard, dialog, ipcMain, powerSaveBlocker, protocol, session, shell,
 } = require('electron');
 const fs = require('fs');
 const path = require('path');
@@ -81,6 +81,21 @@ const dccDriver = {
 
 function camera() {
   return config.cameraDriver === 'dcc' ? dccDriver : builtin;
+}
+
+// Erreur du pilote intégré : on signale un logiciel ouvert qui peut bloquer l'appareil.
+async function explained(fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    if (camera() !== builtin) throw err;
+    const apps = await builtin.cameraApps();
+    if (apps.length) {
+      const many = apps.length > 1;
+      err.message += ` ${apps.join(' et ')} ${many ? 'sont ouverts' : 'est ouvert'} : ${many ? 'fermez-les' : 'fermez-le'}, il peut bloquer l'appareil.`;
+    }
+    throw err;
+  }
 }
 
 function setCameraDriver(driver) {
@@ -166,7 +181,7 @@ function registerIpc() {
   });
 
   ipcMain.handle('camera:test', async () => {
-    const result = await camera().test();
+    const result = await explained(() => camera().test());
     if (result.launched) bringToFront();
     return result;
   });
@@ -174,7 +189,7 @@ function registerIpc() {
     const cam = camera();
     if (!on) return cam.stopLiveView();
     try {
-      await cam.startLiveView();
+      await explained(() => cam.startLiveView());
     } finally {
       if (cam === dccDriver) bringToFront();
     }
@@ -185,13 +200,13 @@ function registerIpc() {
   ipcMain.handle('camera:test-shot', async () => {
     const cam = camera();
     try {
-      return await cam.testShot(capturesFolder());
+      return await explained(() => cam.testShot(capturesFolder()));
     } finally {
       if (cam === dccDriver) bringToFront();
     }
   });
   ipcMain.handle('camera:get-settings', async (e, launch) => {
-    const result = await camera().getSettings(Boolean(launch));
+    const result = await explained(() => camera().getSettings(Boolean(launch)));
     if (result.launched) bringToFront();
     return result.settings;
   });
@@ -200,6 +215,13 @@ function registerIpc() {
   ipcMain.handle('camera:open-log', async () => {
     const err = await shell.openPath(builtin.openLogPath());
     if (err) throw new Error(err);
+  });
+  // Rapport copié dans le presse-papiers, à coller dans un message d'assistance.
+  ipcMain.handle('camera:report', async (e, info = {}) => {
+    const webcams = Array.isArray(info.webcams) ? info.webcams.map(String).slice(0, 10) : [];
+    const text = builtin.report({ driver: config.cameraDriver, apps: await builtin.cameraApps(), webcams });
+    clipboard.writeText(text);
+    return text;
   });
 
   ipcMain.handle('photos:save', async (e, bytes, name) => {

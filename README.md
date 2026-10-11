@@ -87,7 +87,9 @@ Windows reconnaît ces appareils tout seul : il n'y a ni pilote ni logiciel à i
 **Nikon Z 6II et Z f**
 
 - Câble USB-C fourni avec l'appareil.
+- **Z f** : dans **Menu Réseau → USB**, choisissez **MTP/PTP**. En « Streaming USB (UVC/UAC) », le Z f se présente comme une simple webcam (image vidéo sans flash, réglages inaccessibles) ; en « iPhone », l'ordinateur ne le voit pas. L'application signale le mode webcam si elle le détecte.
 - Molette sur **M** (ou P, A, S). Si l'appareil refuse le live view, l'application en donne la raison (batterie vide, appareil trop chaud…).
+- **Z f** : pour régler les ISO et la vitesse depuis l'application, mettez la molette ISO sur **C** et la molette des vitesses sur **1/3 STEP** ; sinon ces réglages restent fixés par les molettes.
 
 **Canon EOS 550D et 1000D**
 
@@ -98,20 +100,26 @@ Windows reconnaît ces appareils tout seul : il n'y a ni pilote ni logiciel à i
 **Si l'appareil ne répond pas**
 
 - Éteignez l'appareil, débranchez-le, rebranchez-le, rallumez-le, puis touchez **Tester l'appareil photo**.
-- Le bouton **📋 Journal de l'appareil** (dans les réglages, sous les réglages de l'appareil) ouvre le fichier `camera.log`, qui note tout ce que l'appareil répond. Envoyez-le si un souci persiste : il permet de comprendre ce qui bloque.
+- Pour continuer en attendant, choisissez **📷 Appareil photo via digiCamControl (ancien mode)** dans la liste des caméras.
+- Touchez **📋 Copier le rapport** (dans les réglages, sous les réglages de l'appareil), puis collez-le (Ctrl+V) dans votre message d'assistance : il contient la version, les logiciels ouverts qui peuvent gêner, et tout ce que l'appareil a répondu. Le bouton **📄 Journal de l'appareil** ouvre ce même journal (`camera.log`) en entier.
 
 **Régler l'appareil depuis l'application**
 
 Dans les réglages, sous **Réglages de l'appareil** : **ouverture (diaphragme)**, **vitesse (obturateur)**, **ISO**, **balance des blancs** et **qualité d'image**. Les listes proposent exactement les valeurs que votre appareil accepte, et chaque changement est envoyé tout de suite à l'appareil. Si une valeur ne se change pas, mettez la molette de l'appareil en **M (manuel)** : en mode automatique, l'appareil garde la main sur ces réglages. Faites ensuite une **📸 Photo de test** pour vérifier le rendu.
+
+Le bouton **👁 Voir le live view** affiche l'image de l'appareil juste au-dessus des réglages, pour voir leur effet en direct. Sur les Nikon, le réglage **Live view : effet des réglages** décide de ce que montre cette image :
+
+- **Oui** : l'image est fidèle à l'ouverture, à la vitesse, aux ISO et à la balance des blancs. Pratique pour régler l'appareil, mais l'image paraît sombre avec des réglages prévus pour le flash (le flash ne part pas pour le live view).
+- **Non** : l'image reste toujours claire, quels que soient les réglages. C'est le plus agréable pour les invités pendant les séances.
 
 **Réglages conseillés sur l'appareil**
 
 - **Format JPEG** (pas RAW seul). En RAW + JPEG, le photobooth garde le JPEG. Une taille moyenne (M) suffit et le transfert est plus rapide.
 - **Mise au point** : le photobooth fait la mise au point juste avant chaque photo. Dans une salle sombre, faites plutôt le point une fois à l'endroit où se tiendront les invités, puis passez l'objectif en **MF** : aucune photo ne sera ratée.
 - **Mode manuel (M)** avec flash, par exemple 1/125 s, f/5.6, ISO 200, flash en TTL ou en manuel à 1/8. Faites quelques essais sur place.
-- **Désactivez la simulation d'exposition**, sinon l'écran de visée est tout noir en mode flash :
-  - Canon : *Simulation expo.* → *Désactivée* ;
-  - Nikon : *Appliquer réglages à la visée écran* → *Non*.
+- **Avec un flash, désactivez la simulation d'exposition** pendant les séances, sinon l'écran de visée est tout noir :
+  - Nikon : réglage **Live view : effet des réglages** → *Non* dans l'application (c'est l'option *Appliquer réglages à la visée écran* de l'appareil) ;
+  - Canon : *Simulation expo.* → *Désactivée*, dans le menu de l'appareil.
 - **Arrêt automatique** de l'appareil : désactivé.
 - **Alimentation secteur** (adaptateur ou fausse batterie) : le live view vide une batterie en une heure environ.
 - Si le flash n'a pas le temps de se recharger entre les 4 photos d'une bande, baissez sa puissance ou augmentez la **pause entre photos** dans les réglages.

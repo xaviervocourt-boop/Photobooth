@@ -5,7 +5,7 @@ import {
 } from './compose.js';
 import { saveFrame, removeFrame, loadFrames, getFrame, frameSlots, describeFrame } from './frames.js';
 import {
-  initCamera, selectCamera, getCamera, listWebcams, webcamLabel, desktop, DSLR_ID, DCC_ID, isDslrId,
+  initCamera, selectCamera, getCamera, listWebcams, webcamLabel, webcamModeCamera, desktop, DSLR_ID, DCC_ID, isDslrId,
 } from './camera.js';
 import { initKeyboard, setKeyboardEnabled } from './keyboard.js';
 import {
@@ -13,7 +13,7 @@ import {
   getOutbox, retryErrors, clearSent, testRelay,
 } from './outbox.js';
 
-const VERSION = '1.4.0';
+const VERSION = '1.4.1';
 const IDLE_TIMEOUT_MS = 90000;
 const EXPORT_BATCH = 25;
 
@@ -37,10 +37,13 @@ const state = {
 };
 
 let desktopInfo = null;
+let previewOn = false; // live view affiché dans les réglages
+let previewFrame = 0;
 
 /* ---------------- Navigation ---------------- */
 
 function showScreen(name) {
+  if (name !== 'settings') stopCamPreview();
   state.screen = name;
   document.querySelectorAll('.screen').forEach((s) => s.classList.toggle('active', s.id === `screen-${name}`));
   const cam = getCamera();
@@ -93,9 +96,23 @@ async function ensureCamera() {
     return true;
   } catch (err) {
     console.error(err);
-    toast(err.message || String(err), 8000);
+    toast(await cameraErrorText(err), 10000);
     return false;
   }
+}
+
+// Message d'erreur de l'appareil photo, avec le cas fréquent de l'appareil
+// branché en mode webcam (USB « UVC/UAC ») : il n'est alors pas pilotable.
+async function cameraErrorText(err) {
+  const msg = (err && err.message) || String(err);
+  if (!desktop || !/Aucun appareil photo/.test(msg)) return msg;
+  const label = await webcamModeCamera();
+  if (!label) return msg;
+  if (/canon|\beos\b/i.test(label)) {
+    return `L'appareil est utilisé comme webcam (« ${label} ») : quittez EOS Webcam Utility, puis débranchez et rebranchez l'appareil.`;
+  }
+  return `L'appareil est branché en mode webcam (« ${label} ») : sur l'appareil, Menu Réseau → USB → MTP/PTP `
+    + '(au lieu de « Streaming USB (UVC/UAC) »), puis débranchez et rebranchez le câble.';
 }
 
 // Ratio de la photo à prendre : celui de la zone transparente du cadre PNG s'il y en a un.
@@ -606,17 +623,19 @@ async function renderCameraSelect() {
   } else if (dslr) {
     hint.textContent = "Le photobooth déclenche l'appareil (et son flash), puis récupère la vraie photo en pleine définition, sans logiciel à installer. Branchez l'appareil en USB et allumez-le ; fermez Photos, EOS Utility, Nikon Transfer ou digiCamControl s'ils sont ouverts.";
   } else if (asWebcam) {
-    hint.textContent = "⚠️ Votre appareil photo est utilisé comme une webcam : le photobooth prend une image de la vidéo (qualité réduite, pas de flash). Pour de vraies photos, choisissez « 📷 Appareil photo » ci-dessus.";
+    hint.textContent = "⚠️ Votre appareil photo est utilisé comme une webcam : le photobooth prend une image de la vidéo (qualité réduite, pas de flash). Pour de vraies photos, choisissez « 📷 Appareil photo Nikon / Canon » ci-dessus (sur un Nikon Z f, réglez d'abord Menu Réseau → USB → MTP/PTP sur l'appareil).";
   } else {
     hint.textContent = desktop ? 'Mode webcam : le photobooth prend une image de la vidéo, sans flash.' : '';
   }
   $('#dslr-settings').classList.toggle('hidden', !dslr);
   $('#dcc-url').classList.toggle('hidden', !dcc);
   $('#cam-log').classList.toggle('hidden', !dslr || dcc);
+  $('#cam-report').classList.toggle('hidden', !dslr || dcc);
   if (dslr) loadCameraSettings(false);
 }
 
 $('#camera-select').addEventListener('change', async (e) => {
+  stopCamPreview();
   // Libère l'appareil avant de changer de pilote (intégré ↔ digiCamControl).
   const before = getCamera();
   if (before && before.kind === 'dslr') before.stop();
@@ -633,7 +652,7 @@ $('#camera-select').addEventListener('change', async (e) => {
 
 /* Réglages de l'appareil photo (application Windows) */
 
-const CAM_FIELDS = ['aperture', 'shutterspeed', 'iso', 'whitebalance', 'compressionsetting'];
+const CAM_FIELDS = ['aperture', 'shutterspeed', 'iso', 'whitebalance', 'compressionsetting', 'liveview'];
 const WB_LABELS = {
   Auto: 'Auto',
   Daylight: 'Lumière du jour',
@@ -648,6 +667,7 @@ const WB_LABELS = {
 };
 
 function camValueLabel(name, v) {
+  if (name === 'liveview') return v === 'Oui' ? 'Oui : image fidèle aux réglages' : 'Non : image toujours claire';
   if (name === 'aperture' && /^\d/.test(v)) return `f/${v}`;
   if (name === 'shutterspeed' && /^1\/\d+$/.test(v)) return `${v} s`;
   if (name === 'whitebalance') return WB_LABELS[v] || v;
@@ -678,11 +698,13 @@ async function loadCameraSettings(launch) {
     await configureDesktop();
     const values = await desktop.camera.getSettings(launch);
     CAM_FIELDS.forEach((name) => fillCamSelect(name, values[name] || { values: [], value: '' }));
-    status.textContent = '';
+    status.textContent = Object.values(values).some((v) => v && v.locked)
+      ? "Certains réglages sont fixés par les molettes de l'appareil : passez en mode M (sur un Zf, molette ISO sur C et molette des vitesses sur 1/3 STEP)."
+      : '';
   } catch (err) {
     CAM_FIELDS.forEach((name) => fillCamSelect(name, { values: [], value: '' }));
     status.textContent = launch
-      ? err.message || String(err)
+      ? await cameraErrorText(err)
       : "Appareil non connecté : touchez « Relire les réglages de l'appareil » ou « Tester l'appareil photo ».";
   } finally {
     camLoading = false;
@@ -709,6 +731,52 @@ document.querySelectorAll('[data-cam]').forEach((select) => {
     }
   });
 });
+
+/* Live view dans les réglages : voir l'effet des réglages de l'appareil */
+
+async function startCamPreview() {
+  const cam = getCamera();
+  const btn = $('#cam-preview-toggle');
+  if (previewOn || cam.kind !== 'dslr') return;
+  btn.disabled = true;
+  btn.textContent = 'Démarrage du live view…';
+  try {
+    await cam.start();
+  } catch (err) {
+    $('#cam-status').textContent = await cameraErrorText(err);
+    return;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '👁 Voir le live view';
+  }
+  if (state.screen !== 'settings') return;
+  previewOn = true;
+  btn.textContent = '■ Arrêter le live view';
+  const canvas = $('#cam-preview');
+  const ctx = canvas.getContext('2d');
+  canvas.classList.remove('hidden');
+  const draw = () => {
+    if (!previewOn) return;
+    if (cam.width && (canvas.width !== cam.width || canvas.height !== cam.height)) {
+      canvas.width = cam.width;
+      canvas.height = cam.height;
+    }
+    if (cam.width) ctx.drawImage(cam.el, 0, 0);
+    previewFrame = requestAnimationFrame(draw);
+  };
+  draw();
+}
+
+function stopCamPreview() {
+  if (!previewOn) return;
+  previewOn = false;
+  cancelAnimationFrame(previewFrame);
+  $('#cam-preview').classList.add('hidden');
+  $('#cam-preview-toggle').textContent = '👁 Voir le live view';
+  getCamera().release(); // le live view s'arrête après quelques minutes sans séance
+}
+
+$('#cam-preview-toggle').addEventListener('click', () => (previewOn ? stopCamPreview() : startCamPreview()));
 
 async function configureDesktop() {
   if (!desktop) return;
@@ -742,7 +810,7 @@ if (desktop) {
       loadCameraSettings(false);
     } catch (err) {
       out.style.color = 'var(--danger)';
-      out.textContent = err.message || String(err);
+      out.textContent = await cameraErrorText(err);
     }
   });
   // Photo de test : montre le fichier reçu de l'appareil et sa définition.
@@ -769,13 +837,24 @@ if (desktop) {
       out.textContent = '';
     } catch (err) {
       out.style.color = 'var(--danger)';
-      out.textContent = err.message || String(err);
+      out.textContent = await cameraErrorText(err);
     } finally {
       btn.disabled = false;
     }
   });
   $('#cam-refresh').addEventListener('click', () => loadCameraSettings(true));
   $('#cam-log').addEventListener('click', () => desktop.camera.openLog().catch((err) => toast(err.message)));
+  // Rapport pour l'assistance : copié, prêt à coller dans un message.
+  $('#cam-report').addEventListener('click', async () => {
+    const status = $('#cam-status');
+    try {
+      const webcams = (await listWebcams()).map((c) => c.label);
+      await desktop.camera.report({ webcams });
+      status.textContent = 'Rapport copié ✓ : collez-le dans votre message (Ctrl+V).';
+    } catch (err) {
+      status.textContent = err.message || String(err);
+    }
+  });
   $('#choose-folder').addEventListener('click', async () => {
     const dir = await desktop.chooseFolder().catch((err) => toast(err.message));
     if (!dir) return;

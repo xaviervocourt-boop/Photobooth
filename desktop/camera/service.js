@@ -22,8 +22,9 @@ const port = process.parentPort
 if (!process.parentPort) process.on('disconnect', () => process.exit(0));
 const NOT_CONNECTED = 0x8007048f;
 
-const NO_CAMERA = 'Aucun appareil photo Nikon ou Canon détecté. Branchez-le en USB, allumez-le, '
-  + 'et fermez les logiciels qui peuvent l\'utiliser (Photos, EOS Utility, digiCamControl…).';
+const NO_CAMERA = 'Aucun appareil photo Nikon ou Canon détecté. Branchez-le en USB et allumez-le '
+  + '(sur un Nikon Z : Menu Réseau → USB → MTP/PTP), puis fermez les logiciels qui peuvent l\'utiliser '
+  + '(Photos, EOS Utility, digiCamControl…).';
 
 // Commandes répétées en continu (live view, événements) : notées seulement quand
 // leur résultat change, pour garder un journal lisible.
@@ -115,7 +116,9 @@ function deviceInfo(t) {
 function open() {
   const sim = process.env.PHOTOBOOTH_CAMERA_SIM;
   if (sim) {
-    const t = logged(require('./sim').createSimulator(sim));
+    const simulated = require('./sim').createSimulator(sim);
+    if (!simulated) throw new PtpError(NO_CAMERA);
+    const t = logged(simulated);
     log(`appareil simulé : ${sim}`);
     return { t, info: deviceInfo(t) };
   }

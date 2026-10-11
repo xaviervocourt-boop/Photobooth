@@ -29,6 +29,8 @@ const PROP = {
   RecordingMedia: 0xd10b,
   LiveViewStatus: 0xd1a2,
   LiveViewProhibit: 0xd1a4,
+  ApplyLiveViewSetting: 0xd17b, // « Appliquer réglages à la visée écran »
+  LiveViewImageSize: 0xd1ac, // 1 = QVGA, 2 = VGA, 3 = XGA
 };
 const NRC = {
   OutOfFocus: 0xa002,
@@ -186,11 +188,27 @@ class NikonCamera extends BaseCamera {
     if (r.code !== RC.OK) this.log(`RecordingMedia=SDRAM refusé (${hex(r.code)})`);
   }
 
+  // Image du live view la plus grande possible (plus nette à l'écran).
+  largestLiveView() {
+    if (!this.hasProp(PROP.LiveViewImageSize)) return;
+    try {
+      const desc = this.getPropDesc(PROP.LiveViewImageSize);
+      const best = Math.max(...desc.values, desc.current);
+      if (desc.writable && best !== desc.current) {
+        const r = this.exec(OP.SetDevicePropValue, [PROP.LiveViewImageSize], { data: encodeValue(desc.type, best) });
+        if (r.code !== RC.OK) this.log(`taille du live view refusée (${hex(r.code)})`);
+      }
+    } catch (err) {
+      this.log(`taille du live view : ${err.message}`);
+    }
+  }
+
   startLiveView() {
     if (this.tryGetValue(PROP.LiveViewStatus, DT.UINT8) === 1) {
       this.liveView = true;
       return;
     }
+    this.largestLiveView();
     this.useSdram();
     const prohibit = this.tryGetValue(PROP.LiveViewProhibit, DT.UINT32);
     if (prohibit) {
@@ -384,6 +402,10 @@ class NikonCamera extends BaseCamera {
       compressionsetting: { code: PROP.Compression, label: (v) => QUALITY[v] || `Qualité ${v}` },
     };
     if (this.nikonShutter !== false) defs.shutterspeed = { code: PROP.NikonExposureTime, label: nikonShutter, fallback: defs.shutterspeed };
+    // Live view qui montre l'effet de l'ouverture, de la vitesse, des ISO et de la balance des blancs.
+    if (this.hasProp(PROP.ApplyLiveViewSetting)) {
+      defs.liveview = { code: PROP.ApplyLiveViewSetting, label: (v) => (v ? 'Oui' : 'Non') };
+    }
     return defs;
   }
 
@@ -401,7 +423,9 @@ class NikonCamera extends BaseCamera {
     const values = desc.values.length ? desc.values : [desc.current];
     const c = choice(values, desc.current, def.label);
     this.settingsCache[name] = { desc, byLabel: c.byLabel };
-    return { values: desc.writable ? c.values : [c.value].filter(Boolean), value: c.value };
+    // Non modifiable : fixé par une molette de l'appareil (ou par son mode).
+    if (!desc.writable) return { values: [c.value].filter(Boolean), value: c.value, locked: true };
+    return { values: c.values, value: c.value };
   }
 
   getSettings() {
@@ -423,7 +447,9 @@ class NikonCamera extends BaseCamera {
     if (!byLabel.has(label)) throw new PtpError('Valeur inconnue pour ce réglage.');
     const r = this.exec(OP.SetDevicePropValue, [desc.code], { data: encodeValue(desc.type, byLabel.get(label)) });
     if (r.code === NRC.CameraModeNotAdjustFNumber || r.code === RC.AccessDenied) {
-      throw new PtpError('Réglage bloqué par le mode de l\'appareil : mettez la molette sur M (manuel).', r.code);
+      throw new PtpError(/^Z ?f$/i.test(this.info.model)
+        ? 'Réglage bloqué par les molettes de l\'appareil : mode M, molette ISO sur C, molette des vitesses sur 1/3 STEP.'
+        : 'Réglage bloqué par le mode de l\'appareil : mettez la molette sur M (manuel).', r.code);
     }
     if (r.code !== RC.OK) throw this.refused(OP.SetDevicePropValue, r.code, 'Réglage');
     this.waitReady(2000);

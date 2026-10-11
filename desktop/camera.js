@@ -170,12 +170,12 @@ async function proxy(base, file) {
   try {
     const res = await fetch(`${base}/liveview.jpg`, { signal: AbortSignal.timeout(2000), cache: 'no-store' });
     const type = res.headers.get('content-type') || '';
-    if (!res.ok || !type.startsWith('image/')) return new Response(null, { status: 503 });
+    if (!res.ok || !type.startsWith('image/')) return new Response(null, { status: 204 });
     return new Response(await res.arrayBuffer(), {
       headers: { 'content-type': 'image/jpeg', 'cache-control': 'no-store' },
     });
   } catch {
-    return new Response(null, { status: 503 });
+    return new Response(null, { status: 204 }); // pas d'image pour l'instant
   }
 }
 

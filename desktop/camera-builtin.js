@@ -7,6 +7,7 @@
 const { app, utilityProcess } = require('electron');
 const childProcess = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const fsp = fs.promises;
@@ -229,9 +230,10 @@ async function stopLiveView() {
 }
 
 // Image de live view pour la page ; une seule demande à la fois au pilote.
+// Pas d'image pour l'instant (photo en cours, redémarrage) : réponse vide (204).
 async function proxy(file) {
   if (file !== 'liveview.jpg') return new Response(null, { status: 404 });
-  if (!wantLive) return new Response(null, { status: 503 });
+  if (!wantLive) return new Response(null, { status: 204 });
   if (!frameRequest) {
     frameRequest = call('frame');
     const done = () => { frameRequest = null; };
@@ -239,12 +241,12 @@ async function proxy(file) {
   }
   try {
     const data = await frameRequest;
-    if (!data || !data.byteLength) return new Response(null, { status: 503 });
+    if (!data || !data.byteLength) return new Response(null, { status: 204 });
     return new Response(Buffer.from(data.buffer, data.byteOffset, data.byteLength), {
       headers: { 'content-type': 'image/jpeg', 'cache-control': 'no-store' },
     });
   } catch {
-    return new Response(null, { status: 503 });
+    return new Response(null, { status: 204 });
   }
 }
 
@@ -347,7 +349,54 @@ function openLogPath() {
   return file;
 }
 
+// Logiciels qui peuvent accaparer l'appareil photo (Windows).
+const CAMERA_APPS = [
+  [/^cameracontrol\.exe$/i, 'digiCamControl'],
+  [/^eos ?utility/i, 'EOS Utility'],
+  [/webcam ?utility/i, 'Webcam Utility'],
+  [/^nx ?tether/i, 'NX Tether'],
+  [/^nikon ?transfer/i, 'Nikon Transfer'],
+  [/^nx ?studio/i, 'NX Studio'],
+  [/^ncontrolpro/i, 'Camera Control Pro'],
+];
+
+function cameraApps() {
+  if (process.platform !== 'win32') return Promise.resolve([]);
+  return new Promise((resolve) => {
+    childProcess.execFile('tasklist', ['/FO', 'CSV', '/NH'], { windowsHide: true, timeout: 5000 }, (err, stdout) => {
+      if (err) {
+        resolve([]);
+        return;
+      }
+      const names = String(stdout).split(/\r?\n/).map((l) => (l.match(/^"([^"]+)"/) || [])[1]).filter(Boolean);
+      const found = CAMERA_APPS.filter(([re]) => names.some((n) => re.test(n))).map(([, label]) => label);
+      resolve([...new Set(found)]);
+    });
+  });
+}
+
+// Rapport à copier dans un message d'assistance : versions, logiciels ouverts,
+// webcams vues par Windows et fin du journal de l'appareil.
+function report({ driver, apps = [], webcams = [] } = {}) {
+  let lines = recent.slice(-120);
+  if (!lines.length) {
+    try {
+      lines = fs.readFileSync(logFile(), 'utf8').split(/\r?\n/).filter(Boolean).slice(-120);
+    } catch {
+      lines = ['(journal vide)'];
+    }
+  }
+  return [
+    `Photobooth ${app.getVersion()} - Electron ${process.versions.electron} - ${os.type()} ${os.release()} ${process.arch}`,
+    `Pilote : ${driver === 'dcc' ? 'digiCamControl' : `intégré (processus ${child ? child.mode : mode})`}`,
+    `Logiciels ouverts qui peuvent gêner : ${apps.length ? apps.join(', ') : 'aucun'}`,
+    `Webcams vues par Windows : ${webcams.length ? webcams.join(', ') : 'aucune'}`,
+    '--- journal de l\'appareil ---',
+    ...lines,
+  ].join('\n');
+}
+
 module.exports = {
   test, startLiveView, stopLiveView, proxy, trigger, fetchCapture, testShot, getSettings, setSetting, shutdown,
-  probe, recentLog, openLogPath, log, CameraError,
+  probe, recentLog, openLogPath, cameraApps, report, log, CameraError,
 };

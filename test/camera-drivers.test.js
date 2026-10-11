@@ -113,6 +113,24 @@ test('nikon: RAW seul → message clair', () => {
   assert.strictEqual(t.state().inMemory, 0);
 });
 
+test('nikon: live view fidèle aux réglages (0xD17B) et image la plus grande (0xD1AC)', () => {
+  const { cam, t } = open('nikon');
+  cam.connect();
+  const s = cam.getSettings();
+  assert.deepStrictEqual(s.liveview, { values: ['Non', 'Oui'], value: 'Non' });
+  assert.strictEqual(cam.setSetting('liveview', 'Oui').value, 'Oui');
+  cam.startLiveView();
+  const size = t.execute(0x1015, [0xd1ac], { read: true }).data[0];
+  assert.strictEqual(size, 3, 'taille XGA non demandée');
+});
+
+test('nikon:zf → modèle et message des molettes', () => {
+  const { cam } = open('nikon:zf,lock');
+  assert.strictEqual(cam.model, 'Nikon Z f');
+  cam.connect();
+  assert.throws(() => cam.setSetting('aperture', '8'), /molette ISO sur C/);
+});
+
 test('nikon:prohibit → raison du refus du live view', () => {
   const { cam } = open('nikon:prohibit');
   cam.connect();

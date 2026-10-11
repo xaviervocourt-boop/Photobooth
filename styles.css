@@ -502,6 +502,17 @@ fieldset > *:not(legend) { clear: both; }
   gap: 0 14px;
 }
 .settings .cam-settings select:disabled { opacity: 0.5; }
+/* Live view dans les réglages, pour voir l'effet des réglages */
+.cam-preview { margin: 10px 0 6px; }
+.cam-preview canvas {
+  display: block;
+  width: 100%;
+  max-height: 42vh;
+  object-fit: contain;
+  margin-bottom: 10px;
+  border-radius: 8px;
+  background: #000;
+}
 .test-shot { margin: 10px 0; }
 .test-shot img { display: block; max-width: 100%; max-height: 320px; border-radius: 8px; }
 .test-shot p { margin: 8px 0 0; }
