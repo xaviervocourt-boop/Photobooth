@@ -4,14 +4,16 @@ import {
   grabFrame, composeSingle, composeStrip, composeWithFrame, frameScale, makeThumb, toBlob, sampleFrame, STRIP_ASPECT,
 } from './compose.js';
 import { saveFrame, removeFrame, loadFrames, getFrame, frameSlots, describeFrame } from './frames.js';
-import { initCamera, selectCamera, getCamera, listWebcams, webcamLabel, desktop, DSLR_ID } from './camera.js';
+import {
+  initCamera, selectCamera, getCamera, listWebcams, webcamLabel, desktop, DSLR_ID, DCC_ID, isDslrId,
+} from './camera.js';
 import { initKeyboard, setKeyboardEnabled } from './keyboard.js';
 import {
   enqueueEmail, parseEmails, processOutbox, startOutboxWorker, onOutboxChange,
   getOutbox, retryErrors, clearSent, testRelay,
 } from './outbox.js';
 
-const VERSION = '1.3.1';
+const VERSION = '1.4.0';
 const IDLE_TIMEOUT_MS = 90000;
 const EXPORT_BATCH = 25;
 
@@ -587,30 +589,40 @@ async function renderCameraSelect() {
   const webcams = await listWebcams();
   const video = desktop ? ' : image vidéo, sans flash' : '';
   select.innerHTML = '';
-  if (desktop) select.append(new Option('📷 Appareil photo : vraie photo avec flash (digiCamControl)', DSLR_ID));
+  if (desktop) select.append(new Option('📷 Appareil photo Nikon / Canon : vraie photo avec flash', DSLR_ID));
   select.append(new Option(`${desktop ? '🎥 Webcam par défaut' : 'Caméra avant (par défaut)'}${video}`, ''));
   webcams.forEach((c) => select.append(new Option(`${desktop ? '🎥 ' : ''}${c.label}${video}`, c.id)));
-  const dslr = Boolean(desktop) && settings.cameraId === DSLR_ID;
+  if (desktop) select.append(new Option('📷 Appareil photo via digiCamControl (ancien mode)', DCC_ID));
+  const dslr = Boolean(desktop) && isDslrId(settings.cameraId);
+  const dcc = dslr && settings.cameraId === DCC_ID;
   select.value = dslr || webcams.some((c) => c.id === settings.cameraId) ? settings.cameraId : '';
   const label = select.selectedOptions[0] ? select.selectedOptions[0].textContent : '';
   const asWebcam = Boolean(desktop) && !dslr && CAMERA_AS_WEBCAM.test(`${label} ${webcamLabel()}`);
   const hint = $('#camera-hint');
   hint.classList.toggle('warn', asWebcam);
   hint.classList.toggle('muted', !asWebcam);
-  if (dslr) {
+  if (dcc) {
     hint.textContent = "Le photobooth déclenche l'appareil (et son flash), puis récupère la vraie photo en pleine définition. digiCamControl doit être installé, avec son serveur web activé (voir le README).";
+  } else if (dslr) {
+    hint.textContent = "Le photobooth déclenche l'appareil (et son flash), puis récupère la vraie photo en pleine définition, sans logiciel à installer. Branchez l'appareil en USB et allumez-le ; fermez Photos, EOS Utility, Nikon Transfer ou digiCamControl s'ils sont ouverts.";
   } else if (asWebcam) {
     hint.textContent = "⚠️ Votre appareil photo est utilisé comme une webcam : le photobooth prend une image de la vidéo (qualité réduite, pas de flash). Pour de vraies photos, choisissez « 📷 Appareil photo » ci-dessus.";
   } else {
     hint.textContent = desktop ? 'Mode webcam : le photobooth prend une image de la vidéo, sans flash.' : '';
   }
   $('#dslr-settings').classList.toggle('hidden', !dslr);
+  $('#dcc-url').classList.toggle('hidden', !dcc);
+  $('#cam-log').classList.toggle('hidden', !dslr || dcc);
   if (dslr) loadCameraSettings(false);
 }
 
 $('#camera-select').addEventListener('change', async (e) => {
+  // Libère l'appareil avant de changer de pilote (intégré ↔ digiCamControl).
+  const before = getCamera();
+  if (before && before.kind === 'dslr') before.stop();
   settings.cameraId = e.target.value;
   saveSettings();
+  await configureDesktop();
   const cam = selectCamera();
   if (cam.kind === 'webcam') cam.stop();
   $('#test-camera-result').textContent = '';
@@ -701,7 +713,11 @@ document.querySelectorAll('[data-cam]').forEach((select) => {
 async function configureDesktop() {
   if (!desktop) return;
   try {
-    desktopInfo = await desktop.configure({ dccUrl: settings.dccUrl, photoFolder: settings.photoFolder });
+    desktopInfo = await desktop.configure({
+      dccUrl: settings.dccUrl,
+      photoFolder: settings.photoFolder,
+      cameraDriver: settings.cameraId === DCC_ID ? 'dcc' : 'builtin',
+    });
   } catch (err) {
     toast(err.message || String(err));
   }
@@ -722,7 +738,7 @@ if (desktop) {
       await configureDesktop(); // prend en compte une adresse tout juste modifiée
       const { cameras } = await desktop.camera.test();
       out.style.color = 'var(--ok)';
-      out.textContent = `Appareil détecté ✅ (n° ${cameras.join(', ')})`;
+      out.textContent = `Appareil détecté ✅ ${cameras.join(', ')}`;
       loadCameraSettings(false);
     } catch (err) {
       out.style.color = 'var(--danger)';
@@ -746,7 +762,8 @@ if (desktop) {
       const img = $('#test-shot-img');
       if (img.src) URL.revokeObjectURL(img.src);
       img.src = URL.createObjectURL(blob);
-      $('#test-shot-info').textContent = `Vraie photo de l'appareil ✅ ${name} · ${bitmap.width} × ${bitmap.height} px · ${(data.byteLength / 1048576).toFixed(1)} Mo`;
+      const size = data.byteLength >= 1048576 ? `${(data.byteLength / 1048576).toFixed(1)} Mo` : `${Math.ceil(data.byteLength / 1024)} Ko`;
+      $('#test-shot-info').textContent = `Vraie photo de l'appareil ✅ ${name} · ${bitmap.width} × ${bitmap.height} px · ${size}`;
       bitmap.close();
       box.classList.remove('hidden');
       out.textContent = '';
@@ -758,6 +775,7 @@ if (desktop) {
     }
   });
   $('#cam-refresh').addEventListener('click', () => loadCameraSettings(true));
+  $('#cam-log').addEventListener('click', () => desktop.camera.openLog().catch((err) => toast(err.message)));
   $('#choose-folder').addEventListener('click', async () => {
     const dir = await desktop.chooseFolder().catch((err) => toast(err.message));
     if (!dir) return;
@@ -974,7 +992,11 @@ initCamera(video, liveCanvas);
 if (desktop) initKeyboard(settings.virtualKeyboard);
 renderHome();
 loadFrames().catch((err) => console.warn('Cadres', err));
-configureDesktop();
+// Appareil photo intégré : connecté dès le lancement, il reste ensuite éveillé
+// entre deux séances (sans appareil branché, rien ne s'affiche).
+configureDesktop().then(() => {
+  if (desktop && settings.cameraId === DSLR_ID) desktop.camera.test().catch(() => {});
+});
 startOutboxWorker();
 if (getCamera().showOnHome) ensureCamera();
 

@@ -24,8 +24,25 @@ jobs:
 
       - run: npm ci
 
+      - name: Tester les pilotes Nikon / Canon (appareils simulés)
+        run: npm test
+
+      - name: Auto-test de la liaison USB avec Windows
+        run: node -e "console.log(JSON.stringify(require('./desktop/camera/wpd').selfTest(), null, 2))"
+
       - name: Construire l'installeur
         run: npx electron-builder --win nsis --x64 --publish never
+
+      - name: Auto-test du pilote dans l'application construite
+        shell: pwsh
+        run: |
+          $out = Join-Path $PWD 'selftest.json'
+          $env:PHOTOBOOTH_SELFTEST = $out
+          $p = Start-Process -FilePath 'dist\win-unpacked\Photobooth.exe' -PassThru
+          if (-not $p.WaitForExit(90000)) { $p.Kill(); throw "Auto-test : délai dépassé" }
+          if (-not (Test-Path $out)) { throw "Auto-test : pas de résultat" }
+          Get-Content $out
+          if (-not (Get-Content $out -Raw | ConvertFrom-Json).ok) { throw "Auto-test : échec" }
 
       - name: Mettre l'installeur à disposition
         uses: actions/upload-artifact@v7

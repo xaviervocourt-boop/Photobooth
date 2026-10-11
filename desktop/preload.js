@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('photoboothDesktop', {
     testShot: () => call('camera:test-shot'),
     getSettings: (launch) => call('camera:get-settings', launch),
     setSetting: (name, value) => call('camera:set-setting', name, value),
+    openLog: () => call('camera:open-log'),
   },
   savePhoto: (bytes, name) => call('photos:save', bytes, name),
   chooseFolder: () => call('photos:choose-folder'),

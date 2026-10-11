@@ -1,5 +1,6 @@
 // Application Windows du photobooth : la même interface que la version iPad,
-// dans une fenêtre plein écran, avec en plus l'appareil photo via digiCamControl.
+// dans une fenêtre plein écran, avec en plus un vrai appareil photo (pilote
+// intégré pour Nikon et Canon, ou digiCamControl).
 'use strict';
 
 const {
@@ -7,7 +8,8 @@ const {
 } = require('electron');
 const fs = require('fs');
 const path = require('path');
-const camera = require('./camera');
+const dcc = require('./camera');
+const builtin = require('./camera-builtin');
 
 const fsp = fs.promises;
 const ROOT = path.join(__dirname, '..');
@@ -35,7 +37,7 @@ protocol.registerSchemesAsPrivileged([{
   privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true },
 }]);
 
-const config = { dccUrl: 'http://127.0.0.1:5513', photoFolder: '' };
+const config = { dccUrl: 'http://127.0.0.1:5513', photoFolder: '', cameraDriver: 'builtin' };
 let prefs = { kiosk: true };
 let win = null;
 
@@ -64,6 +66,31 @@ function capturesFolder() {
   return path.join(photoFolder(), 'originaux');
 }
 
+// Pilote de l'appareil choisi dans les réglages : intégré (par défaut) ou digiCamControl.
+const dccDriver = {
+  test: () => dcc.test(config.dccUrl),
+  startLiveView: () => dcc.startLiveView(config.dccUrl),
+  stopLiveView: () => dcc.stopLiveView(config.dccUrl),
+  proxy: (file) => dcc.proxy(config.dccUrl, file),
+  trigger: (folder) => dcc.trigger(config.dccUrl, folder),
+  fetchCapture: (id) => dcc.fetchCapture(id),
+  testShot: (folder) => dcc.testShot(config.dccUrl, folder),
+  getSettings: (launch) => dcc.getSettings(config.dccUrl, { launch }),
+  setSetting: (name, value) => dcc.setSetting(config.dccUrl, name, value),
+};
+
+function camera() {
+  return config.cameraDriver === 'dcc' ? dccDriver : builtin;
+}
+
+function setCameraDriver(driver) {
+  if (!['builtin', 'dcc'].includes(driver) || driver === config.cameraDriver) return;
+  // Libère l'appareil pour l'autre pilote.
+  if (config.cameraDriver === 'builtin') builtin.shutdown().catch(() => {});
+  else dcc.stopLiveView(config.dccUrl).catch(() => {});
+  config.cameraDriver = driver;
+}
+
 // Remet la fenêtre du photobooth devant (digiCamControl peut passer au premier plan).
 function bringToFront() {
   if (!win) return;
@@ -76,7 +103,7 @@ async function serve(request) {
   const url = new URL(request.url);
   if (url.host !== HOST) return new Response('Not found', { status: 404 });
   if (url.pathname.startsWith('/__camera/')) {
-    return camera.proxy(config.dccUrl, url.pathname.slice('/__camera/'.length));
+    return camera().proxy(url.pathname.slice('/__camera/'.length));
   }
   const rel = decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname);
   const file = path.normalize(path.join(ROOT, rel));
@@ -134,38 +161,46 @@ function registerIpc() {
   ipcMain.handle('desktop:configure', (e, cfg = {}) => {
     if (typeof cfg.dccUrl === 'string' && cfg.dccUrl.trim()) config.dccUrl = cfg.dccUrl.trim().replace(/\/+$/, '');
     if (typeof cfg.photoFolder === 'string') config.photoFolder = cfg.photoFolder;
+    if (typeof cfg.cameraDriver === 'string') setCameraDriver(cfg.cameraDriver);
     return { photoFolder: photoFolder(), kiosk: prefs.kiosk, version: app.getVersion() };
   });
 
   ipcMain.handle('camera:test', async () => {
-    const result = await camera.test(config.dccUrl);
+    const result = await camera().test();
     if (result.launched) bringToFront();
     return result;
   });
   ipcMain.handle('camera:liveview', async (e, on) => {
-    if (!on) return camera.stopLiveView(config.dccUrl);
+    const cam = camera();
+    if (!on) return cam.stopLiveView();
     try {
-      await camera.startLiveView(config.dccUrl);
+      await cam.startLiveView();
     } finally {
-      bringToFront();
+      if (cam === dccDriver) bringToFront();
     }
     return null;
   });
-  ipcMain.handle('camera:trigger', () => camera.trigger(config.dccUrl, capturesFolder()));
-  ipcMain.handle('camera:fetch', (e, id) => camera.fetchCapture(id));
+  ipcMain.handle('camera:trigger', () => camera().trigger(capturesFolder()));
+  ipcMain.handle('camera:fetch', (e, id) => camera().fetchCapture(id));
   ipcMain.handle('camera:test-shot', async () => {
+    const cam = camera();
     try {
-      return await camera.testShot(config.dccUrl, capturesFolder());
+      return await cam.testShot(capturesFolder());
     } finally {
-      bringToFront();
+      if (cam === dccDriver) bringToFront();
     }
   });
   ipcMain.handle('camera:get-settings', async (e, launch) => {
-    const result = await camera.getSettings(config.dccUrl, { launch: Boolean(launch) });
+    const result = await camera().getSettings(Boolean(launch));
     if (result.launched) bringToFront();
     return result.settings;
   });
-  ipcMain.handle('camera:set-setting', (e, name, value) => camera.setSetting(config.dccUrl, String(name), String(value)));
+  ipcMain.handle('camera:set-setting', (e, name, value) => camera().setSetting(String(name), String(value)));
+  // Journal du pilote intégré, à envoyer en cas de souci avec l'appareil.
+  ipcMain.handle('camera:open-log', async () => {
+    const err = await shell.openPath(builtin.openLogPath());
+    if (err) throw new Error(err);
+  });
 
   ipcMain.handle('photos:save', async (e, bytes, name) => {
     const dir = photoFolder();
@@ -198,7 +233,24 @@ function registerIpc() {
   ipcMain.handle('app:quit', () => app.quit());
 }
 
-if (!app.requestSingleInstanceLock()) {
+// Auto-test du pilote d'appareil photo dans l'application installée (lancé
+// par la construction de l'installateur) : résultat écrit dans un fichier.
+async function selfTest(file) {
+  let result;
+  try {
+    result = { ok: true, ...(await builtin.selfTest()) };
+  } catch (err) {
+    result = { ok: false, error: err.message || String(err) };
+  }
+  result.versions = { app: app.getVersion(), electron: process.versions.electron, node: process.versions.node };
+  await fsp.writeFile(file, JSON.stringify(result, null, 2));
+  await builtin.shutdown().catch(() => {});
+  app.exit(0);
+}
+
+if (process.env.PHOTOBOOTH_SELFTEST) {
+  app.whenReady().then(() => selfTest(process.env.PHOTOBOOTH_SELFTEST));
+} else if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', bringToFront);
@@ -218,6 +270,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on('window-all-closed', () => app.quit());
   app.on('before-quit', () => {
-    camera.stopLiveView(config.dccUrl).catch(() => {});
+    builtin.shutdown().catch(() => {});
+    if (config.cameraDriver === 'dcc') dcc.stopLiveView(config.dccUrl).catch(() => {});
   });
 }

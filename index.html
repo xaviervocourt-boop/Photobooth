@@ -194,7 +194,7 @@
         </label>
         <p id="camera-hint" class="small"></p>
         <div id="dslr-settings" class="desktop-only hidden">
-          <label>Adresse de digiCamControl
+          <label id="dcc-url" class="hidden">Adresse de digiCamControl
             <input data-setting="dccUrl" type="url" placeholder="http://127.0.0.1:5513">
           </label>
           <div class="btn-row">
@@ -217,6 +217,7 @@
           </div>
           <div class="btn-row">
             <button id="cam-refresh" type="button" class="secondary">↻ Relire les réglages de l'appareil</button>
+            <button id="cam-log" type="button" class="secondary hidden">📋 Journal de l'appareil</button>
           </div>
           <p id="cam-status" class="small muted"></p>
         </div>

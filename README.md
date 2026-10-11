@@ -3,7 +3,7 @@
 Un photobooth complet, en deux versions qui partagent le même code :
 
 - **iPad** : une web app (PWA) qu'on installe sur l'écran d'accueil depuis Safari. Elle s'ouvre en plein écran et fonctionne **sans connexion**.
-- **Windows** : une vraie application à installer, qui fonctionne avec une webcam ou avec un **appareil photo reflex ou hybride et son flash** (via digiCamControl).
+- **Windows** : une vraie application à installer, qui fonctionne avec une webcam ou avec un **appareil photo Nikon ou Canon et son flash**, piloté directement en USB, sans autre logiciel à installer.
 
 ## Fonctions
 
@@ -12,7 +12,7 @@ Un photobooth complet, en deux versions qui partagent le même code :
 - **Envoi par mail** avec raccourcis (@gmail.com, @hotmail.fr…) et **file d'attente hors ligne** : sans réseau, la demande est gardée et part toute seule dès que la connexion revient
 - Compte à rebours, flash, son, écran qui reste allumé
 - **Réglages cachés** : le bouton ⚙️ en haut à droite de l'accueil est presque invisible (5 % d'opacité) et protégé par un **code PIN** (par défaut : `0000`). La galerie des photos se trouve dans les réglages, pas sur l'accueil.
-- Sur Windows : **appareil photo reflex/hybride avec flash** (vraie photo pleine définition), **réglages de l'appareil** (ouverture, vitesse, ISO…) depuis l'app, **clavier virtuel** à l'écran, copie de chaque photo en JPEG dans un dossier, plein écran (mode kiosque), **gros bouton USB** (touche Entrée ou Espace)
+- Sur Windows : **appareil photo Nikon ou Canon avec flash** (vraie photo pleine définition, pilote intégré), **réglages de l'appareil** (ouverture, vitesse, ISO…) depuis l'app, **clavier virtuel** à l'écran, copie de chaque photo en JPEG dans un dossier, plein écran (mode kiosque), **gros bouton USB** (touche Entrée ou Espace)
 
 ## Utiliser votre propre cadre (PNG Photoshop)
 
@@ -68,28 +68,37 @@ Pour sortir : ⚙️ → code PIN → **Quitter l'application** tout en bas des 
 
 Dans les réglages, section **Prise de vue → Caméra** :
 
-- **📷 Appareil photo (digiCamControl)**, le choix par défaut : l'application déclenche le vrai appareil photo. Le flash posé sur la griffe (ou un flash de studio avec déclencheur radio) part à chaque photo, puis l'application récupère le vrai fichier JPEG en pleine définition. C'est cette photo qui est mise en page et envoyée par mail.
+- **📷 Appareil photo Nikon / Canon**, le choix par défaut : l'application pilote elle-même l'appareil en USB, **sans logiciel à installer**. Elle affiche le live view pendant le compte à rebours, déclenche l'appareil (le flash posé sur la griffe, ou un flash de studio avec déclencheur radio, part à chaque photo), puis récupère le vrai fichier JPEG en pleine définition. C'est cette photo qui est mise en page et envoyée par mail.
 - **🎥 Webcam** : l'application prend une image du flux vidéo, comme une capture d'écran, sans flash. C'est aussi ce qui se passe si l'appareil photo est branché comme une webcam (EOS Webcam Utility, mode « USB streaming », carte d'acquisition HDMI) : l'application l'indique alors par un avertissement orange.
+- **📷 Appareil photo via digiCamControl (ancien mode)** : pour un appareil d'une autre marque (Sony…), voir plus bas.
 
-Le bouton **📸 Photo de test** (mode appareil photo) déclenche l'appareil et affiche la photo reçue, avec son nom de fichier et sa définition (par exemple 6000 × 4000 px) : c'est la preuve que la vraie photo arrive bien.
+Le bouton **📸 Photo de test** déclenche l'appareil et affiche la photo reçue, avec son nom de fichier et sa définition (par exemple 6048 × 4024 px) : c'est la preuve que la vraie photo arrive bien.
 
-## 3. Brancher un appareil photo avec flash (digiCamControl)
+## 3. Brancher l'appareil photo
 
-[digiCamControl](https://digicamcontrol.com/) est un logiciel gratuit pour Windows qui pilote les appareils photo en USB : **Canon et Nikon** (la plupart des modèles) et certains **Sony**. Vérifiez votre modèle dans la liste des appareils compatibles sur leur site.
+Le pilote intégré est prévu pour les **Nikon Z 6II et Z f** et les **Canon EOS 550D et 1000D**. Il devrait aussi marcher avec la plupart des autres reflex et hybrides Nikon et Canon EOS.
 
-**Installation (une seule fois)**
+1. Branchez l'appareil **directement** sur un port USB du PC (évitez les hubs et les rallonges), puis allumez-le.
+2. Fermez les logiciels qui peuvent utiliser l'appareil en même temps : EOS Utility, Nikon Transfer, NX Tether, digiCamControl, l'application Photos de Windows.
+3. Dans Photobooth : ⚙️ → **Caméra** → *📷 Appareil photo Nikon / Canon*, puis **Tester l'appareil photo** et **📸 Photo de test**.
 
-1. Installez digiCamControl depuis <https://digicamcontrol.com/>.
-2. Branchez l'appareil en USB, allumez-le, puis ouvrez digiCamControl : l'appareil doit apparaître.
-3. Dans digiCamControl, ouvrez **File → Settings → Webserver** et cochez :
-   - **Use web server** (port **5513**),
-   - **Allow interaction via webserver**.
-4. Fermez puis relancez digiCamControl.
-5. Dans Photobooth : ⚙️ → **Caméra** → *📷 Appareil photo*, puis **Tester l'appareil photo** et **📸 Photo de test**.
+Windows reconnaît ces appareils tout seul : il n'y a ni pilote ni logiciel à installer. La photo part directement de l'appareil vers le PC.
 
-Important : l'appareil doit être branché en mode normal (PC / PTP), **pas en mode webcam ni « USB streaming »**. Fermez aussi EOS Utility, Imaging Edge ou tout autre logiciel qui utiliserait l'appareil en même temps.
+**Nikon Z 6II et Z f**
 
-Ensuite, Photobooth lance digiCamControl tout seul s'il n'est pas ouvert, et réduit sa fenêtre pendant les séances.
+- Câble USB-C fourni avec l'appareil.
+- Molette sur **M** (ou P, A, S). Si l'appareil refuse le live view, l'application en donne la raison (batterie vide, appareil trop chaud…).
+
+**Canon EOS 550D et 1000D**
+
+- Câble mini-USB fourni avec l'appareil.
+- Dans le menu de l'appareil, **activez la prise de vue Live View** (550D : *Fonction Live View/vidéo → Prise de vue Live View : Activée* ; 1000D : *Réglages fonction Live View → Prise de vue avec Live View : Activée*).
+- Molette sur **M**. Le photobooth garde l'appareil allumé entre deux séances.
+
+**Si l'appareil ne répond pas**
+
+- Éteignez l'appareil, débranchez-le, rebranchez-le, rallumez-le, puis touchez **Tester l'appareil photo**.
+- Le bouton **📋 Journal de l'appareil** (dans les réglages, sous les réglages de l'appareil) ouvre le fichier `camera.log`, qui note tout ce que l'appareil répond. Envoyez-le si un souci persiste : il permet de comprendre ce qui bloque.
 
 **Régler l'appareil depuis l'application**
 
@@ -97,20 +106,28 @@ Dans les réglages, sous **Réglages de l'appareil** : **ouverture (diaphragme)*
 
 **Réglages conseillés sur l'appareil**
 
-- **Format JPEG** (pas RAW seul). Une taille moyenne (M) suffit et le transfert est plus rapide.
-- **Mise au point manuelle (MF)** : faites le point une fois à l'endroit où se tiendront les invités, puis passez l'objectif en MF. Ça évite les photos ratées dans la pénombre.
+- **Format JPEG** (pas RAW seul). En RAW + JPEG, le photobooth garde le JPEG. Une taille moyenne (M) suffit et le transfert est plus rapide.
+- **Mise au point** : le photobooth fait la mise au point juste avant chaque photo. Dans une salle sombre, faites plutôt le point une fois à l'endroit où se tiendront les invités, puis passez l'objectif en **MF** : aucune photo ne sera ratée.
 - **Mode manuel (M)** avec flash, par exemple 1/125 s, f/5.6, ISO 200, flash en TTL ou en manuel à 1/8. Faites quelques essais sur place.
 - **Désactivez la simulation d'exposition**, sinon l'écran de visée est tout noir en mode flash :
   - Canon : *Simulation expo.* → *Désactivée* ;
-  - Nikon : *Appliquer réglages à la visée écran* → *Non* ;
-  - Sony : *Affichage Live View* → *Effet réglages désactivé*.
+  - Nikon : *Appliquer réglages à la visée écran* → *Non*.
 - **Arrêt automatique** de l'appareil : désactivé.
 - **Alimentation secteur** (adaptateur ou fausse batterie) : le live view vide une batterie en une heure environ.
 - Si le flash n'a pas le temps de se recharger entre les 4 photos d'une bande, baissez sa puissance ou augmentez la **pause entre photos** dans les réglages.
-- Dans digiCamControl, gardez le transfert sur **Save to PC only**.
 - Pensez à désactiver l'**effet miroir** dans les réglages si vous voulez des photos dans le vrai sens.
 
 Pour économiser l'appareil, le live view ne tourne que pendant les séances. Il s'arrête deux minutes après la dernière photo.
+
+**Ancien mode : digiCamControl**
+
+Pour un appareil que le pilote intégré ne gère pas (Sony…), le logiciel gratuit [digiCamControl](https://digicamcontrol.com/) peut servir d'intermédiaire :
+
+1. Installez digiCamControl, branchez l'appareil et vérifiez qu'il apparaît dans digiCamControl.
+2. Dans digiCamControl, **File → Settings → Webserver** : cochez **Use web server** (port **5513**) et **Allow interaction via webserver**, puis relancez-le. Gardez le transfert sur **Save to PC only**.
+3. Dans Photobooth : ⚙️ → **Caméra** → *📷 Appareil photo via digiCamControl (ancien mode)*, puis **Tester l'appareil photo**.
+
+Photobooth lance alors digiCamControl tout seul s'il n'est pas ouvert, et réduit sa fenêtre pendant les séances.
 
 ## 4. Où sont les photos ?
 
@@ -188,8 +205,11 @@ L'application Windows utilise Electron autour des mêmes fichiers :
 ```bash
 npm install
 npm start          # lance l'application
+npm test           # teste les pilotes Nikon / Canon sur des appareils simulés
 npm run dist       # construit l'installeur (sur Windows)
 ```
+
+Sans appareil branché, `PHOTOBOOTH_CAMERA_SIM=nikon npm start` (ou `canon`, `canon1000d`) lance l'application avec un appareil simulé, qui répond aux mêmes commandes qu'un vrai.
 
 L'installeur est construit automatiquement par GitHub Actions (`.github/workflows/windows.yml`) à chaque mise à jour de `main`. Pour publier une version téléchargeable dans **Releases**, poussez une étiquette, par exemple `git tag v1.2.0 && git push origin v1.2.0`.
 
@@ -198,7 +218,7 @@ index.html            écrans de l'app
 styles.css            styles
 js/app.js             logique principale (prise de vue, galerie, réglages)
 js/keyboard.js        clavier virtuel AZERTY (application Windows)
-js/camera.js          sources d'image : webcam ou appareil photo (digiCamControl)
+js/camera.js          sources d'image : webcam ou appareil photo
 js/compose.js         mise en page des photos (cadre, bande de 4, texte)
 js/frames.js          cadres PNG perso (détection des zones transparentes)
 js/outbox.js          file d'envoi des mails, hors ligne
@@ -207,7 +227,10 @@ js/settings.js        réglages par défaut
 sw.js                 cache hors ligne
 apps-script/Code.gs   relais d'envoi des mails (Google Apps Script)
 desktop/main.js       application Windows (fenêtre, dossiers, plein écran)
-desktop/camera.js     pilotage de digiCamControl (live view, déclenchement, fichiers)
+desktop/camera-builtin.js  pilote intégré : processus séparé, journal camera.log
+desktop/camera/       pilote USB : protocole PTP, Nikon, Canon EOS, liaison Windows (WPD), appareils simulés
+desktop/camera.js     ancien mode digiCamControl (live view, déclenchement, fichiers)
 desktop/preload.js    pont entre la page et l'application Windows
+test/                 tests des pilotes (npm test)
 package.json          dépendances et configuration de l'installeur
 ```

@@ -1,8 +1,11 @@
 // Sources d'image : webcam (getUserMedia, iPad ou PC) ou appareil photo
-// reflex/hybride piloté par digiCamControl (application Windows uniquement).
+// reflex/hybride piloté par l'application Windows (pilote intégré pour Nikon
+// et Canon, ou digiCamControl).
 import { settings } from './settings.js';
 
 export const DSLR_ID = 'dslr';
+export const DCC_ID = 'dslr-dcc';
+export const isDslrId = (id) => id === DSLR_ID || id === DCC_ID;
 export const desktop = window.photoboothDesktop || null;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -97,7 +100,9 @@ class DslrSource {
     while (Date.now() - this.lastFrameAt > 3000) {
       if (Date.now() > deadline) {
         this.stop();
-        throw new Error("L'appareil photo n'envoie pas d'image (live view). Vérifiez qu'il est allumé et détecté par digiCamControl.");
+        throw new Error(settings.cameraId === DCC_ID
+          ? "L'appareil photo n'envoie pas d'image (live view). Vérifiez qu'il est allumé et détecté par digiCamControl."
+          : "L'appareil photo n'envoie pas d'image (live view). Vérifiez qu'il est allumé et branché en USB.");
       }
       await sleep(100);
     }
@@ -178,7 +183,7 @@ export function initCamera(video, canvas) {
 
 // Choisit la source d'après les réglages, et éteint l'autre.
 export function selectCamera() {
-  const next = desktop && settings.cameraId === DSLR_ID ? dslr : webcam;
+  const next = desktop && isDslrId(settings.cameraId) ? dslr : webcam;
   if (current && current !== next) current.stop();
   current = next;
   webcam.el.classList.toggle('hidden', current !== webcam);
