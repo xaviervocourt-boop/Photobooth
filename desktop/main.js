@@ -153,6 +153,19 @@ function registerIpc() {
   });
   ipcMain.handle('camera:trigger', () => camera.trigger(config.dccUrl, capturesFolder()));
   ipcMain.handle('camera:fetch', (e, id) => camera.fetchCapture(id));
+  ipcMain.handle('camera:test-shot', async () => {
+    try {
+      return await camera.testShot(config.dccUrl, capturesFolder());
+    } finally {
+      bringToFront();
+    }
+  });
+  ipcMain.handle('camera:get-settings', async (e, launch) => {
+    const result = await camera.getSettings(config.dccUrl, { launch: Boolean(launch) });
+    if (result.launched) bringToFront();
+    return result.settings;
+  });
+  ipcMain.handle('camera:set-setting', (e, name, value) => camera.setSetting(config.dccUrl, String(name), String(value)));
 
   ipcMain.handle('photos:save', async (e, bytes, name) => {
     const dir = photoFolder();

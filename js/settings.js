@@ -1,4 +1,6 @@
 const KEY = 'photobooth.settings';
+const VERSION = 2;
+const isDesktop = Boolean(window.photoboothDesktop);
 
 export const DEFAULTS = {
   title: 'Photobooth',
@@ -12,10 +14,11 @@ export const DEFAULTS = {
   countdown: 3,
   pause: 1.5,
   mirror: true,
-  galleryPublic: true,
-  cameraId: '',
+  // Application Windows : le vrai appareil photo par défaut.
+  cameraId: isDesktop ? 'dslr' : '',
   dccUrl: 'http://127.0.0.1:5513',
   photoFolder: '',
+  virtualKeyboard: true,
   scriptUrl: '',
   secret: '',
   emailSubject: 'Votre photo 📸',
@@ -26,11 +29,18 @@ export const DEFAULTS = {
 export const settings = load();
 
 function load() {
+  let stored = {};
   try {
-    return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(KEY) || '{}') };
+    stored = JSON.parse(localStorage.getItem(KEY) || '{}');
   } catch {
-    return { ...DEFAULTS };
+    // Stockage indisponible : réglages par défaut.
   }
+  const s = { ...DEFAULTS, ...stored };
+  // Version 1 : l'application Windows démarrait sur la webcam, qui ne prend
+  // qu'une image de la vidéo. On passe sur le vrai appareil photo.
+  if ((stored.version || 1) < 2 && isDesktop && !stored.cameraId) s.cameraId = 'dslr';
+  s.version = VERSION;
+  return s;
 }
 
 export function saveSettings() {

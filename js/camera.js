@@ -146,8 +146,8 @@ class DslrSource {
   // l'appareil est prêt pour la photo suivante ; le fichier arrive ensuite.
   async capture() {
     const id = await desktop.camera.trigger();
-    const image = desktop.camera.fetch(id).then(async (bytes) => {
-      const blob = new Blob([bytes], { type: 'image/jpeg' });
+    const image = desktop.camera.fetch(id).then(async ({ data }) => {
+      const blob = new Blob([data], { type: 'image/jpeg' });
       const bitmap = await createImageBitmap(blob, { imageOrientation: 'from-image' });
       return { source: bitmap, width: bitmap.width, height: bitmap.height };
     });
@@ -190,10 +190,15 @@ export function getCamera() {
   return current;
 }
 
-// Liste des caméras pour les réglages (les noms n'apparaissent qu'après autorisation).
-export async function listCameras() {
+// Nom du flux vidéo utilisé, pour repérer un appareil photo branché en webcam.
+export function webcamLabel() {
+  const track = webcam && webcam.stream && webcam.stream.getVideoTracks()[0];
+  return track ? track.label : '';
+}
+
+// Webcams et flux vidéo pour les réglages (les noms n'apparaissent qu'après autorisation).
+export async function listWebcams() {
   const list = [];
-  if (desktop) list.push({ id: DSLR_ID, label: 'Appareil photo reflex / hybride (digiCamControl)' });
   try {
     const devices = await navigator.mediaDevices.enumerateDevices();
     devices.filter((d) => d.kind === 'videoinput').forEach((d, i) => {

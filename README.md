@@ -7,14 +7,12 @@ Un photobooth complet, en deux versions qui partagent le même code :
 
 ## Fonctions
 
-- **1 photo ou bande de 4** : au choix de l'invité, ou format imposé dans les réglages
-- **Filtres** avec aperçu en direct : Normal, Noir & blanc, Sépia, Vintage, Chaud, Froid, Pop, Ciné
+- **1 photo ou bande de 4** : au choix de l'invité, ou format imposé dans les réglages. Le compte à rebours démarre dès que l'invité a choisi.
 - **Votre propre cadre PNG** fait dans Photoshop, ou un cadre généré (titre, texte, date, couleurs, police)
-- **Galerie** de toutes les photos de l'événement, avec export vers Photos ou AirDrop
-- **Envoi par mail** avec **file d'attente hors ligne** : sans réseau, la demande est gardée sur l'iPad et part toute seule dès que la connexion revient
+- **Envoi par mail** avec raccourcis (@gmail.com, @hotmail.fr…) et **file d'attente hors ligne** : sans réseau, la demande est gardée et part toute seule dès que la connexion revient
 - Compte à rebours, flash, son, écran qui reste allumé
-- Réglages protégés par un **code PIN** (par défaut : `0000`)
-- Sur Windows : **appareil photo reflex/hybride avec flash**, copie de chaque photo en JPEG dans un dossier, plein écran (mode kiosque), **gros bouton USB** (touche Entrée ou Espace)
+- **Réglages cachés** : le bouton ⚙️ en haut à droite de l'accueil est presque invisible (5 % d'opacité) et protégé par un **code PIN** (par défaut : `0000`). La galerie des photos se trouve dans les réglages, pas sur l'accueil.
+- Sur Windows : **appareil photo reflex/hybride avec flash** (vraie photo pleine définition), **réglages de l'appareil** (ouverture, vitesse, ISO…) depuis l'app, **clavier virtuel** à l'écran, copie de chaque photo en JPEG dans un dossier, plein écran (mode kiosque), **gros bouton USB** (touche Entrée ou Espace)
 
 ## Utiliser votre propre cadre (PNG Photoshop)
 
@@ -70,8 +68,10 @@ Pour sortir : ⚙️ → code PIN → **Quitter l'application** tout en bas des 
 
 Dans les réglages, section **Prise de vue → Caméra** :
 
-- **Webcam** : n'importe quelle webcam USB, ou un appareil photo branché par une carte d'acquisition HDMI. Simple, mais sans le flash de l'appareil.
-- **Appareil photo reflex / hybride (digiCamControl)** : l'application déclenche le vrai appareil photo. Le flash posé sur la griffe (ou un flash de studio avec déclencheur radio) part donc à chaque photo, et vous obtenez la vraie qualité de l'appareil.
+- **📷 Appareil photo (digiCamControl)**, le choix par défaut : l'application déclenche le vrai appareil photo. Le flash posé sur la griffe (ou un flash de studio avec déclencheur radio) part à chaque photo, puis l'application récupère le vrai fichier JPEG en pleine définition. C'est cette photo qui est mise en page et envoyée par mail.
+- **🎥 Webcam** : l'application prend une image du flux vidéo, comme une capture d'écran, sans flash. C'est aussi ce qui se passe si l'appareil photo est branché comme une webcam (EOS Webcam Utility, mode « USB streaming », carte d'acquisition HDMI) : l'application l'indique alors par un avertissement orange.
+
+Le bouton **📸 Photo de test** (mode appareil photo) déclenche l'appareil et affiche la photo reçue, avec son nom de fichier et sa définition (par exemple 6000 × 4000 px) : c'est la preuve que la vraie photo arrive bien.
 
 ## 3. Brancher un appareil photo avec flash (digiCamControl)
 
@@ -85,9 +85,15 @@ Dans les réglages, section **Prise de vue → Caméra** :
    - **Use web server** (port **5513**),
    - **Allow interaction via webserver**.
 4. Fermez puis relancez digiCamControl.
-5. Dans Photobooth : ⚙️ → **Caméra** → *Appareil photo reflex / hybride*, puis **Tester l'appareil photo**.
+5. Dans Photobooth : ⚙️ → **Caméra** → *📷 Appareil photo*, puis **Tester l'appareil photo** et **📸 Photo de test**.
+
+Important : l'appareil doit être branché en mode normal (PC / PTP), **pas en mode webcam ni « USB streaming »**. Fermez aussi EOS Utility, Imaging Edge ou tout autre logiciel qui utiliserait l'appareil en même temps.
 
 Ensuite, Photobooth lance digiCamControl tout seul s'il n'est pas ouvert, et réduit sa fenêtre pendant les séances.
+
+**Régler l'appareil depuis l'application**
+
+Dans les réglages, sous **Réglages de l'appareil** : **ouverture (diaphragme)**, **vitesse (obturateur)**, **ISO**, **balance des blancs** et **qualité d'image**. Les listes proposent exactement les valeurs que votre appareil accepte, et chaque changement est envoyé tout de suite à l'appareil. Si une valeur ne se change pas, mettez la molette de l'appareil en **M (manuel)** : en mode automatique, l'appareil garde la main sur ces réglages. Faites ensuite une **📸 Photo de test** pour vérifier le rendu.
 
 **Réglages conseillés sur l'appareil**
 
@@ -112,12 +118,15 @@ Pour économiser l'appareil, le live view ne tourne que pendant les séances. Il
 - Les originaux pleine définition de l'appareil photo sont dans le sous-dossier **originaux**.
 - Le bouton **📂 Ouvrir le dossier** les affiche dans l'Explorateur.
 
-## 5. Gros bouton USB
+## 5. Clavier virtuel
+
+Sur un écran tactile, un clavier AZERTY s'affiche dès qu'on touche une zone de texte : l'adresse mail des invités, mais aussi tous les champs des réglages. Il a une rangée de chiffres, le **@**, les touches **.fr** et **.com**, et les accents (touche **é&?**). Le code PIN s'affiche sur un pavé numérique. Si vous utilisez un vrai clavier, vous pouvez le désactiver dans les réglages, section **Ordinateur**.
+
+## 6. Gros bouton USB
 
 Un gros bouton d'arcade USB qui simule la touche **Entrée** ou **Espace** suffit :
 
-- à l'accueil, il lance la séance (si le format est imposé dans les réglages) ;
-- sur l'écran des filtres, il déclenche la photo ;
+- à l'accueil, il lance la séance et le compte à rebours (si le format est imposé dans les réglages) ;
 - sur le résultat, il termine et revient à l'accueil.
 
 Avec le format au choix de l'invité, les touches **1** et **4** choisissent 1 photo ou la bande de 4.
@@ -188,10 +197,10 @@ L'installeur est construit automatiquement par GitHub Actions (`.github/workflow
 index.html            écrans de l'app
 styles.css            styles
 js/app.js             logique principale (prise de vue, galerie, réglages)
+js/keyboard.js        clavier virtuel AZERTY (application Windows)
 js/camera.js          sources d'image : webcam ou appareil photo (digiCamControl)
 js/compose.js         mise en page des photos (cadre, bande de 4, texte)
 js/frames.js          cadres PNG perso (détection des zones transparentes)
-js/filters.js         filtres (aperçu CSS + rendu pixel identique)
 js/outbox.js          file d'envoi des mails, hors ligne
 js/db.js              stockage IndexedDB
 js/settings.js        réglages par défaut

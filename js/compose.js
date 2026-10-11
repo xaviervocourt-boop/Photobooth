@@ -1,5 +1,3 @@
-import { applyFilter } from './filters.js';
-
 export const STRIP_ASPECT = 4 / 3;
 
 const FONTS = {
@@ -9,8 +7,8 @@ const FONTS = {
 };
 
 // Recadre une image (webcam ou appareil photo) au centre, au ratio demandé,
-// puis applique le miroir et le filtre.
-export function grabFrame(image, aspect, { mirror, filter, maxWidth = 2400 }) {
+// avec l'effet miroir si besoin.
+export function grabFrame(image, aspect, { mirror, maxWidth = 3000 }) {
   const { source, width: iw, height: ih } = image;
   let sw = iw;
   let sh = iw / aspect;
@@ -25,15 +23,13 @@ export function grabFrame(image, aspect, { mirror, filter, maxWidth = 2400 }) {
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const ctx = canvas.getContext('2d');
   ctx.imageSmoothingQuality = 'high';
   if (mirror) {
     ctx.translate(w, 0);
     ctx.scale(-1, 1);
   }
   ctx.drawImage(source, sx, sy, sw, sh, 0, 0, w, h);
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  applyFilter(ctx, w, h, filter);
   return canvas;
 }
 

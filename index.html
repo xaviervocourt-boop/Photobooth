@@ -33,7 +33,6 @@
   <!-- Accueil -->
   <section id="screen-home" class="screen active">
     <div class="home-top">
-      <button id="btn-gallery" class="chip">🖼️ Galerie</button>
       <div class="top-right">
         <span id="net-status" class="chip ghost"></span>
         <button id="btn-settings" class="icon-btn" aria-label="Réglages">⚙️</button>
@@ -53,19 +52,6 @@
         </button>
       </div>
       <button id="btn-start" class="primary huge hidden">Commencer</button>
-    </div>
-  </section>
-
-  <!-- Choix du filtre -->
-  <section id="screen-filter" class="screen">
-    <div class="filter-top">
-      <button class="chip" data-action="home">← Retour</button>
-      <span class="hint">Choisissez un filtre</span>
-      <span></span>
-    </div>
-    <div class="filter-bottom">
-      <div id="filter-list" class="filter-list"></div>
-      <button id="btn-go" class="primary huge">C'est parti !</button>
     </div>
   </section>
 
@@ -91,7 +77,7 @@
   <!-- Galerie -->
   <section id="screen-gallery" class="screen panel">
     <header class="panel-header">
-      <button class="chip" data-action="home">← Retour</button>
+      <button class="chip" id="gallery-back">← Retour</button>
       <h2>Galerie <span id="gallery-count" class="muted"></span></h2>
       <span></span>
     </header>
@@ -117,6 +103,7 @@
     <form id="email-form" class="dialog" autocomplete="off" novalidate>
       <h2>Recevoir la photo par mail</h2>
       <input id="email-input" type="text" inputmode="email" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="votre@email.com">
+      <div id="email-domains" class="email-domains"></div>
       <p class="muted small">Plusieurs adresses ? Séparez-les par une virgule.</p>
       <p id="email-error" class="error hidden"></p>
       <div class="dialog-actions">
@@ -205,13 +192,33 @@
         <label>Caméra
           <select id="camera-select"></select>
         </label>
-        <p id="camera-hint" class="muted small"></p>
+        <p id="camera-hint" class="small"></p>
         <div id="dslr-settings" class="desktop-only hidden">
           <label>Adresse de digiCamControl
             <input data-setting="dccUrl" type="url" placeholder="http://127.0.0.1:5513">
           </label>
-          <button id="test-camera" type="button" class="secondary">Tester l'appareil photo</button>
+          <div class="btn-row">
+            <button id="test-camera" type="button" class="secondary">Tester l'appareil photo</button>
+            <button id="test-shot" type="button" class="secondary">📸 Photo de test</button>
+          </div>
           <p id="test-camera-result" class="small"></p>
+          <div id="test-shot-box" class="test-shot hidden">
+            <img id="test-shot-img" alt="Photo de test">
+            <p id="test-shot-info" class="small"></p>
+          </div>
+          <h3 class="subhead">Réglages de l'appareil</h3>
+          <p class="muted small">Mode M (manuel) conseillé : l'ouverture et la vitesse ne se règlent que si la molette de l'appareil le permet.</p>
+          <div class="cam-settings">
+            <label>Ouverture (diaphragme) <select data-cam="aperture" disabled></select></label>
+            <label>Vitesse (obturateur) <select data-cam="shutterspeed" disabled></select></label>
+            <label>ISO <select data-cam="iso" disabled></select></label>
+            <label>Balance des blancs <select data-cam="whitebalance" disabled></select></label>
+            <label>Qualité d'image <select data-cam="compressionsetting" disabled></select></label>
+          </div>
+          <div class="btn-row">
+            <button id="cam-refresh" type="button" class="secondary">↻ Relire les réglages de l'appareil</button>
+          </div>
+          <p id="cam-status" class="small muted"></p>
         </div>
         <label>Format
           <select data-setting="mode">
@@ -221,11 +228,10 @@
           </select>
         </label>
         <div class="grid2">
-          <label>Compte à rebours (s) <input data-setting="countdown" type="number" min="1" max="10"></label>
-          <label>Pause entre photos (s) <input data-setting="pause" type="number" min="0" max="10" step="0.5"></label>
+          <label>Compte à rebours (s) <input data-setting="countdown" data-type="number" type="text" inputmode="numeric"></label>
+          <label>Pause entre photos (s) <input data-setting="pause" data-type="number" type="text" inputmode="decimal"></label>
         </div>
         <label class="row"><input data-setting="mirror" type="checkbox"> Effet miroir (comme un selfie)</label>
-        <label class="row"><input data-setting="galleryPublic" type="checkbox"> Galerie accessible aux invités</label>
       </fieldset>
 
       <fieldset>
@@ -259,6 +265,9 @@
       <fieldset>
         <legend>Photos</legend>
         <p id="photos-summary" class="muted"></p>
+        <div class="btn-row">
+          <button id="open-gallery" type="button" class="secondary">🖼️ Voir les photos</button>
+        </div>
         <div id="export-batches" class="btn-row"></div>
         <button id="delete-all" type="button" class="danger">Supprimer toutes les photos</button>
       </fieldset>
@@ -276,6 +285,7 @@
           <button id="open-folder" type="button" class="secondary">📂 Ouvrir le dossier</button>
         </div>
         <label class="row"><input id="kiosk-toggle" type="checkbox"> Plein écran (mode kiosque)</label>
+        <label class="row"><input data-setting="virtualKeyboard" type="checkbox"> Clavier virtuel à l'écran (écran tactile)</label>
         <p class="muted small">Gros bouton USB ou clavier : Entrée ou Espace lance la séance puis la photo. Au choix du format : touche 1 (1 photo) ou 4 (bande).</p>
         <button id="quit-app" type="button" class="danger">Quitter l'application</button>
       </fieldset>

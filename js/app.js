@@ -1,17 +1,17 @@
 import { db, uid } from './db.js';
-import { settings, saveSettings } from './settings.js';
-import { FILTERS, getFilter, cssFilter } from './filters.js';
+import { settings, saveSettings, DEFAULTS } from './settings.js';
 import {
   grabFrame, composeSingle, composeStrip, composeWithFrame, makeThumb, toBlob, sampleFrame, STRIP_ASPECT,
 } from './compose.js';
 import { saveFrame, removeFrame, loadFrames, getFrame, frameSlots, describeFrame } from './frames.js';
-import { initCamera, selectCamera, getCamera, listCameras, desktop, DSLR_ID } from './camera.js';
+import { initCamera, selectCamera, getCamera, listWebcams, webcamLabel, desktop, DSLR_ID } from './camera.js';
+import { initKeyboard, setKeyboardEnabled } from './keyboard.js';
 import {
   enqueueEmail, parseEmails, processOutbox, startOutboxWorker, onOutboxChange,
   getOutbox, retryErrors, clearSent, testRelay,
 } from './outbox.js';
 
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 const IDLE_TIMEOUT_MS = 90000;
 const EXPORT_BATCH = 25;
 
@@ -25,13 +25,13 @@ const viewfinder = $('#viewfinder');
 const state = {
   screen: 'home',
   mode: 'single',
-  filterId: 'none',
   busy: false,
   starting: false,
   shotIndex: 0,
   lastPhotoId: null,
   emailTargetId: null,
   viewerPhotoId: null,
+  galleryFrom: 'home',
 };
 
 let desktopInfo = null;
@@ -42,7 +42,7 @@ function showScreen(name) {
   state.screen = name;
   document.querySelectorAll('.screen').forEach((s) => s.classList.toggle('active', s.id === `screen-${name}`));
   const cam = getCamera();
-  if (name !== 'filter' && name !== 'capture' && !(name === 'home' && cam.showOnHome)) cam.release();
+  if (name !== 'capture' && !(name === 'home' && cam.showOnHome)) cam.release();
   if (name === 'home') {
     document.body.classList.remove('admin');
     renderHome();
@@ -54,7 +54,7 @@ function showScreen(name) {
 let idleTimer;
 function resetIdle() {
   clearTimeout(idleTimer);
-  if (['filter', 'result', 'gallery'].includes(state.screen)) {
+  if (['result', 'gallery'].includes(state.screen)) {
     idleTimer = setTimeout(() => {
       closeModals();
       showScreen('home');
@@ -64,6 +64,7 @@ function resetIdle() {
 ['pointerdown', 'keydown'].forEach((ev) => document.addEventListener(ev, resetIdle, { passive: true }));
 
 function closeModals() {
+  if (document.activeElement) document.activeElement.blur(); // referme aussi le clavier virtuel
   document.querySelectorAll('.modal').forEach((m) => m.classList.add('hidden'));
 }
 
@@ -131,11 +132,7 @@ video.addEventListener('resize', layoutViewfinder);
 liveCanvas.addEventListener('resize', layoutViewfinder);
 
 function applyLiveSettings() {
-  const filter = state.screen === 'home' ? 'none' : cssFilter(getFilter(state.filterId));
-  [video, liveCanvas].forEach((el) => {
-    el.classList.toggle('mirror', settings.mirror);
-    el.style.filter = filter;
-  });
+  [video, liveCanvas].forEach((el) => el.classList.toggle('mirror', settings.mirror));
 }
 
 /* ---------------- Sons ---------------- */
@@ -184,7 +181,6 @@ function renderHome() {
   $('#mode-choice').classList.toggle('hidden', !choice);
   $('#btn-start').classList.toggle('hidden', choice);
   $('#home-sub').textContent = choice ? 'Choisissez votre format' : 'Touchez pour commencer';
-  $('#btn-gallery').classList.toggle('hidden', !settings.galleryPublic);
   document.body.classList.toggle('no-home-preview', !getCamera().showOnHome);
   applyLiveSettings();
   updateNetStatus();
@@ -200,19 +196,18 @@ async function begin(mode) {
     slowShown = true;
     toast("Préparation de l'appareil photo…", 15000);
   }, 600);
+  let ready = false;
   try {
-    if (!(await ensureCamera())) return;
-    if (slowShown) hideToast();
-    state.mode = mode;
-    state.shotIndex = 0;
-    state.filterId = 'none';
-    renderFilterList();
-    showScreen('filter');
-    applyLiveSettings();
+    ready = await ensureCamera();
+    if (ready && slowShown) hideToast();
   } finally {
     clearTimeout(slow);
     state.starting = false;
   }
+  if (!ready) return;
+  state.mode = mode;
+  state.shotIndex = 0;
+  runCapture();
 }
 
 document.querySelectorAll('.big-choice').forEach((btn) => {
@@ -236,7 +231,6 @@ document.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter' && e.key !== ' ') return;
   const actions = {
     home: settings.mode !== 'choice' ? () => begin(settings.mode) : null,
-    filter: runCapture,
     result: () => showScreen('home'),
   };
   const action = actions[state.screen];
@@ -244,70 +238,6 @@ document.addEventListener('keydown', (e) => {
   e.preventDefault();
   action();
 });
-document.querySelectorAll('[data-action="home"]').forEach((b) => b.addEventListener('click', () => showScreen('home')));
-
-/* ---------------- Filtres ---------------- */
-
-let previewTimer;
-function renderFilterList() {
-  const list = $('#filter-list');
-  list.innerHTML = '';
-  FILTERS.forEach((f) => {
-    const btn = document.createElement('button');
-    btn.className = 'filter-btn';
-    btn.dataset.id = f.id;
-    const c = document.createElement('canvas');
-    c.width = 192;
-    c.height = 144;
-    c.style.filter = cssFilter(f);
-    const label = document.createElement('span');
-    label.textContent = f.name;
-    btn.append(c, label);
-    btn.addEventListener('click', () => {
-      state.filterId = f.id;
-      markSelectedFilter();
-      applyLiveSettings();
-    });
-    list.append(btn);
-  });
-  markSelectedFilter();
-  clearInterval(previewTimer);
-  drawFilterPreviews();
-  previewTimer = setInterval(() => {
-    if (state.screen !== 'filter') return clearInterval(previewTimer);
-    drawFilterPreviews();
-  }, 400);
-}
-
-function markSelectedFilter() {
-  document.querySelectorAll('.filter-btn').forEach((b) => b.classList.toggle('selected', b.dataset.id === state.filterId));
-}
-
-function drawFilterPreviews() {
-  const cam = getCamera();
-  if (!cam.width || !cam.height) return;
-  const vw = cam.width;
-  const vh = cam.height;
-  const ar = 4 / 3;
-  let sw = vw;
-  let sh = vw / ar;
-  if (sh > vh) {
-    sh = vh;
-    sw = vh * ar;
-  }
-  document.querySelectorAll('.filter-btn canvas').forEach((c) => {
-    const ctx = c.getContext('2d');
-    ctx.save();
-    if (settings.mirror) {
-      ctx.translate(c.width, 0);
-      ctx.scale(-1, 1);
-    }
-    ctx.drawImage(cam.el, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, c.width, c.height);
-    ctx.restore();
-  });
-}
-
-$('#btn-go').addEventListener('click', runCapture);
 
 /* ---------------- Prise de vue ---------------- */
 
@@ -322,7 +252,6 @@ async function runCapture() {
   if (state.busy || state.starting) return;
   state.busy = true;
   const cam = getCamera();
-  const filter = getFilter(state.filterId);
   const shots = state.mode === 'strip' ? 4 : 1;
   const frame = getFrame(state.mode);
   const slots = frame && frameSlots(frame, state.mode);
@@ -334,6 +263,12 @@ async function runCapture() {
     showScreen('capture');
     applyLiveSettings();
     await requestWakeLock();
+    // Laisse aux invités le temps de se placer avant le compte à rebours.
+    cd.textContent = 'Préparez-vous !';
+    cd.classList.remove('hidden', 'pop');
+    cd.classList.add('message');
+    await sleep(1500);
+    cd.classList.remove('message');
     for (let i = 0; i < shots; i++) {
       state.shotIndex = i;
       layoutViewfinder();
@@ -362,8 +297,7 @@ async function runCapture() {
     const images = await Promise.all(pending);
     const frames = images.map((img, i) => grabFrame(img, shotAspect(state.mode, i) || img.width / img.height, {
       mirror: settings.mirror,
-      filter,
-      maxWidth: slots ? Math.min(2400, slots[i].w) : 2400,
+      maxWidth: slots ? Math.min(3000, slots[i].w) : 3000,
     }));
     images.forEach((img) => img.source.close && img.source.close());
     let final;
@@ -373,7 +307,6 @@ async function runCapture() {
       id: uid(),
       createdAt: Date.now(),
       mode: state.mode,
-      filter: filter.id,
       blob: await toBlob(final, 0.92),
       thumb: await toBlob(makeThumb(final), 0.8),
     };
@@ -389,6 +322,7 @@ async function runCapture() {
     state.busy = false;
     state.shotIndex = 0;
     cd.classList.add('hidden');
+    cd.classList.remove('message');
     counter.classList.add('hidden');
     processing.classList.add('hidden');
   }
@@ -439,7 +373,40 @@ function openEmail(photoId) {
   setTimeout(() => $('#email-input').focus(), 50);
 }
 
-$('#email-cancel').addEventListener('click', () => $('#email-modal').classList.add('hidden'));
+$('#email-cancel').addEventListener('click', closeModals);
+
+const EMAIL_DOMAINS = [
+  'gmail.com', 'hotmail.fr', 'hotmail.com', 'outlook.fr', 'outlook.com', 'yahoo.fr',
+  'icloud.com', 'orange.fr', 'free.fr', 'sfr.fr', 'laposte.net', 'live.fr',
+];
+
+// Remplace (ou ajoute) le domaine de la dernière adresse saisie.
+function applyEmailDomain(domain) {
+  const input = $('#email-input');
+  const parts = input.value.split(',');
+  const local = parts.pop().trim().split('@')[0];
+  parts.push(`${local}@${domain}`);
+  input.value = parts.map((p) => p.trim()).filter(Boolean).join(', ');
+  input.focus();
+  // Pas encore de nom : le curseur se place devant le « @ ».
+  const pos = local ? input.value.length : input.value.length - domain.length - 1;
+  try {
+    input.setSelectionRange(pos, pos);
+  } catch {
+    // champ sans sélection
+  }
+  $('#email-error').classList.add('hidden');
+}
+
+EMAIL_DOMAINS.forEach((domain) => {
+  const chip = document.createElement('button');
+  chip.type = 'button';
+  chip.className = 'domain-chip';
+  chip.textContent = `@${domain}`;
+  chip.addEventListener('pointerdown', (e) => e.preventDefault()); // garde le clavier ouvert
+  chip.addEventListener('click', () => applyEmailDomain(domain));
+  $('#email-domains').append(chip);
+});
 $('#email-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const emails = parseEmails($('#email-input').value);
@@ -488,11 +455,13 @@ async function renderGallery() {
   });
 }
 
-async function openGallery() {
+async function openGallery(from) {
+  state.galleryFrom = from;
   await renderGallery();
   showScreen('gallery');
 }
-$('#btn-gallery').addEventListener('click', openGallery);
+$('#open-gallery').addEventListener('click', () => openGallery('settings'));
+$('#gallery-back').addEventListener('click', () => showScreen(state.galleryFrom || 'home'));
 
 let viewerUrl;
 function openViewer(photo) {
@@ -563,7 +532,7 @@ $('#btn-settings').addEventListener('click', () => {
   $('#pin-modal').classList.remove('hidden');
   setTimeout(() => $('#pin-input').focus(), 50);
 });
-$('#pin-cancel').addEventListener('click', () => $('#pin-modal').classList.add('hidden'));
+$('#pin-cancel').addEventListener('click', closeModals);
 $('#pin-form').addEventListener('submit', (e) => {
   e.preventDefault();
   if ($('#pin-input').value !== String(settings.pin)) {
@@ -596,26 +565,47 @@ document.querySelectorAll('[data-setting]').forEach((el) => {
   el.addEventListener('change', () => {
     const key = el.dataset.setting;
     if (el.type === 'checkbox') settings[key] = el.checked;
-    else if (el.type === 'number') settings[key] = Number(el.value);
-    else settings[key] = el.value.trim();
+    else if (el.dataset.type === 'number') {
+      const n = Number(el.value.replace(',', '.'));
+      settings[key] = Number.isFinite(n) && n >= 0 ? n : DEFAULTS[key];
+      el.value = settings[key];
+    } else settings[key] = el.value.trim();
     if (key === 'pin' && !settings.pin) settings.pin = '0000';
     saveSettings();
     if (key === 'scriptUrl' || key === 'secret') processOutbox();
     if (key === 'dccUrl') configureDesktop();
+    if (key === 'virtualKeyboard') setKeyboardEnabled(settings.virtualKeyboard);
   });
 });
 
+// Appareil photo branché comme une webcam (utilitaire webcam du fabricant,
+// mode « USB streaming » ou carte d'acquisition HDMI) : image vidéo, sans flash.
+const CAMERA_AS_WEBCAM = /canon|eos|nikon|sony|alpha|fuji|lumix|panasonic|olympus|om system|pentax|webcam utility|imaging edge|usb streaming|cam link|hdmi|capture/i;
+
 async function renderCameraSelect() {
   const select = $('#camera-select');
-  const cameras = await listCameras();
+  const webcams = await listWebcams();
+  const video = desktop ? ' : image vidéo, sans flash' : '';
   select.innerHTML = '';
-  select.append(new Option(desktop ? 'Webcam par défaut' : 'Caméra avant (par défaut)', ''));
-  cameras.forEach((c) => select.append(new Option(c.label, c.id)));
-  select.value = cameras.some((c) => c.id === settings.cameraId) ? settings.cameraId : '';
-  $('#camera-hint').textContent = settings.cameraId === DSLR_ID
-    ? "digiCamControl doit être lancé, avec le serveur web activé, avant la séance (voir le README). L'appareil se déclenche avec son flash."
-    : '';
-  $('#dslr-settings').classList.toggle('hidden', settings.cameraId !== DSLR_ID);
+  if (desktop) select.append(new Option('📷 Appareil photo : vraie photo avec flash (digiCamControl)', DSLR_ID));
+  select.append(new Option(`${desktop ? '🎥 Webcam par défaut' : 'Caméra avant (par défaut)'}${video}`, ''));
+  webcams.forEach((c) => select.append(new Option(`${desktop ? '🎥 ' : ''}${c.label}${video}`, c.id)));
+  const dslr = Boolean(desktop) && settings.cameraId === DSLR_ID;
+  select.value = dslr || webcams.some((c) => c.id === settings.cameraId) ? settings.cameraId : '';
+  const label = select.selectedOptions[0] ? select.selectedOptions[0].textContent : '';
+  const asWebcam = Boolean(desktop) && !dslr && CAMERA_AS_WEBCAM.test(`${label} ${webcamLabel()}`);
+  const hint = $('#camera-hint');
+  hint.classList.toggle('warn', asWebcam);
+  hint.classList.toggle('muted', !asWebcam);
+  if (dslr) {
+    hint.textContent = "Le photobooth déclenche l'appareil (et son flash), puis récupère la vraie photo en pleine définition. digiCamControl doit être installé, avec son serveur web activé (voir le README).";
+  } else if (asWebcam) {
+    hint.textContent = "⚠️ Votre appareil photo est utilisé comme une webcam : le photobooth prend une image de la vidéo (qualité réduite, pas de flash). Pour de vraies photos, choisissez « 📷 Appareil photo » ci-dessus.";
+  } else {
+    hint.textContent = desktop ? 'Mode webcam : le photobooth prend une image de la vidéo, sans flash.' : '';
+  }
+  $('#dslr-settings').classList.toggle('hidden', !dslr);
+  if (dslr) loadCameraSettings(false);
 }
 
 $('#camera-select').addEventListener('change', async (e) => {
@@ -623,9 +613,89 @@ $('#camera-select').addEventListener('change', async (e) => {
   saveSettings();
   const cam = selectCamera();
   if (cam.kind === 'webcam') cam.stop();
-  renderCameraSelect();
   $('#test-camera-result').textContent = '';
-  if (cam.showOnHome) ensureCamera();
+  $('#test-shot-box').classList.add('hidden');
+  if (cam.showOnHome) await ensureCamera();
+  renderCameraSelect();
+});
+
+/* Réglages de l'appareil photo (application Windows) */
+
+const CAM_FIELDS = ['aperture', 'shutterspeed', 'iso', 'whitebalance', 'compressionsetting'];
+const WB_LABELS = {
+  Auto: 'Auto',
+  Daylight: 'Lumière du jour',
+  Shade: 'Ombre',
+  Cloudy: 'Nuageux',
+  Tungsten: 'Tungstène',
+  Fluorescent: 'Fluorescent',
+  Flash: 'Flash',
+  Manual: 'Manuelle',
+  Custom: 'Personnalisée',
+  'Color Temperature': 'Température de couleur',
+};
+
+function camValueLabel(name, v) {
+  if (name === 'aperture' && /^\d/.test(v)) return `f/${v}`;
+  if (name === 'shutterspeed' && /^1\/\d+$/.test(v)) return `${v} s`;
+  if (name === 'whitebalance') return WB_LABELS[v] || v;
+  return v;
+}
+
+function fillCamSelect(name, { values, value }) {
+  const select = document.querySelector(`[data-cam="${name}"]`);
+  select.innerHTML = '';
+  if (!values.length) {
+    select.append(new Option('Non disponible', ''));
+    select.disabled = true;
+    return;
+  }
+  if (!value) select.append(new Option('—', ''));
+  values.forEach((v) => select.append(new Option(camValueLabel(name, v), v)));
+  select.value = value;
+  select.disabled = false;
+}
+
+let camLoading = false;
+async function loadCameraSettings(launch) {
+  if (!desktop || camLoading) return;
+  camLoading = true;
+  const status = $('#cam-status');
+  status.textContent = "Lecture des réglages de l'appareil…";
+  try {
+    await configureDesktop();
+    const values = await desktop.camera.getSettings(launch);
+    CAM_FIELDS.forEach((name) => fillCamSelect(name, values[name] || { values: [], value: '' }));
+    status.textContent = '';
+  } catch (err) {
+    CAM_FIELDS.forEach((name) => fillCamSelect(name, { values: [], value: '' }));
+    status.textContent = launch
+      ? err.message || String(err)
+      : "Appareil non connecté : touchez « Relire les réglages de l'appareil » ou « Tester l'appareil photo ».";
+  } finally {
+    camLoading = false;
+  }
+}
+
+document.querySelectorAll('[data-cam]').forEach((select) => {
+  select.addEventListener('change', async () => {
+    const name = select.dataset.cam;
+    const wanted = select.value;
+    if (!wanted) return;
+    const status = $('#cam-status');
+    select.disabled = true;
+    status.textContent = 'Réglage en cours…';
+    try {
+      const result = await desktop.camera.setSetting(name, wanted);
+      fillCamSelect(name, result);
+      status.textContent = result.value === wanted
+        ? 'Réglage appliqué ✓'
+        : "L'appareil n'a pas pris ce réglage : vérifiez que sa molette est en mode M (manuel).";
+    } catch (err) {
+      status.textContent = err.message || String(err);
+      select.disabled = false;
+    }
+  });
 });
 
 async function configureDesktop() {
@@ -653,11 +723,41 @@ if (desktop) {
       const { cameras } = await desktop.camera.test();
       out.style.color = 'var(--ok)';
       out.textContent = `Appareil détecté ✅ (n° ${cameras.join(', ')})`;
+      loadCameraSettings(false);
     } catch (err) {
       out.style.color = 'var(--danger)';
       out.textContent = err.message || String(err);
     }
   });
+  // Photo de test : montre le fichier reçu de l'appareil et sa définition.
+  $('#test-shot').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    const out = $('#test-camera-result');
+    const box = $('#test-shot-box');
+    btn.disabled = true;
+    box.classList.add('hidden');
+    out.style.color = '';
+    out.textContent = "Déclenchement de l'appareil…";
+    try {
+      await configureDesktop();
+      const { name, data } = await desktop.camera.testShot();
+      const blob = new Blob([data], { type: 'image/jpeg' });
+      const bitmap = await createImageBitmap(blob, { imageOrientation: 'from-image' });
+      const img = $('#test-shot-img');
+      if (img.src) URL.revokeObjectURL(img.src);
+      img.src = URL.createObjectURL(blob);
+      $('#test-shot-info').textContent = `Vraie photo de l'appareil ✅ ${name} · ${bitmap.width} × ${bitmap.height} px · ${(data.byteLength / 1048576).toFixed(1)} Mo`;
+      bitmap.close();
+      box.classList.remove('hidden');
+      out.textContent = '';
+    } catch (err) {
+      out.style.color = 'var(--danger)';
+      out.textContent = err.message || String(err);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  $('#cam-refresh').addEventListener('click', () => loadCameraSettings(true));
   $('#choose-folder').addEventListener('click', async () => {
     const dir = await desktop.chooseFolder().catch((err) => toast(err.message));
     if (!dir) return;
@@ -871,6 +971,7 @@ $('#app-version').textContent = VERSION;
 document.body.classList.toggle('desktop', Boolean(desktop));
 if (desktop) $('#viewer-share').textContent = '📂 Afficher dans le dossier';
 initCamera(video, liveCanvas);
+if (desktop) initKeyboard(settings.virtualKeyboard);
 renderHome();
 loadFrames().catch((err) => console.warn('Cadres', err));
 configureDesktop();

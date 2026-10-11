@@ -1,6 +1,6 @@
 // Met l'app en cache pour qu'elle s'ouvre même sans connexion.
 // Pensez à changer CACHE à chaque nouvelle version publiée.
-const CACHE = 'photobooth-v1.2.0';
+const CACHE = 'photobooth-v1.3.0';
 const ASSETS = [
   './',
   './index.html',
@@ -9,11 +9,11 @@ const ASSETS = [
   './js/app.js',
   './js/db.js',
   './js/settings.js',
-  './js/filters.js',
   './js/compose.js',
   './js/outbox.js',
   './js/frames.js',
   './js/camera.js',
+  './js/keyboard.js',
   './icons/icon-180.png',
   './icons/icon-192.png',
   './icons/icon-512.png',

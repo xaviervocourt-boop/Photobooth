@@ -14,7 +14,10 @@ const CAPTURE_TIMEOUT_MS = 45000;
 const FILE_TIMEOUT_MS = 30000;
 const LAUNCH_TIMEOUT_MS = 30000;
 
-const NO_CAMERA = "digiCamControl ne voit aucun appareil photo. Branchez-le en USB, allumez-le et attendez qu'il apparaisse dans digiCamControl.";
+const NO_CAMERA = "digiCamControl ne voit aucun appareil photo. Branchez-le en USB, allumez-le (pas en mode webcam ni « USB streaming ») et attendez qu'il apparaisse dans digiCamControl.";
+
+// Réglages de prise de vue modifiables depuis l'application.
+const SETTINGS = ['aperture', 'shutterspeed', 'iso', 'whitebalance', 'compressionsetting'];
 
 class CameraError extends Error {}
 
@@ -103,11 +106,47 @@ async function listCameras(base) {
   return text.split('\n').slice(0, -1).map((s, i) => s.trim() || `appareil ${i + 1}`);
 }
 
-async function test(base) {
-  const launched = await ensureRunning(base);
+async function test(base, { launch = true } = {}) {
+  const launched = launch ? await ensureRunning(base) : (await ping(base, 3000), false);
   const cameras = await listCameras(base);
   if (!cameras.length) throw new CameraError(NO_CAMERA);
   return { cameras, launched };
+}
+
+/* ---------- Réglages de l'appareil (ouverture, vitesse, ISO…) ---------- */
+
+function lines(text) {
+  return text.includes('\n') ? text.split('\n').slice(0, -1).map((s) => s.trim()).filter(Boolean) : [];
+}
+
+// Valeurs possibles et valeur actuelle. Un réglage que l'appareil ne gère pas
+// (ou que le mode de la molette bloque) revient sans valeurs.
+async function readSetting(base, name) {
+  const values = lines(slcResult(await request(base, `slc=list&param1=${name}`)));
+  const current = slcResult(await request(base, `slc=get&param1=${name}`)).trim();
+  const value = values.includes(current) ? current : '';
+  return { values, value };
+}
+
+async function getSettings(base, { launch = false } = {}) {
+  const { launched } = await test(base, { launch });
+  const settings = {};
+  for (const name of SETTINGS) {
+    try {
+      settings[name] = await readSetting(base, name);
+    } catch (err) {
+      if (err instanceof CameraError && /injoignable|délai/.test(err.message)) throw err;
+      settings[name] = { values: [], value: '' };
+    }
+  }
+  return { settings, launched };
+}
+
+async function setSetting(base, name, value) {
+  if (!SETTINGS.includes(name)) throw new CameraError('Réglage inconnu.');
+  const text = slcResult(await request(base, `slc=set&param1=${name}&param2=${encodeURIComponent(value)}`, 10000)).trim();
+  if (text !== 'OK') throw new CameraError(`L'appareil a refusé ce réglage (${text}).`);
+  return readSetting(base, name);
 }
 
 async function startLiveView(base) {
@@ -193,7 +232,14 @@ async function fetchCapture(id) {
   const wait = pending.get(id);
   if (!wait) throw new CameraError('Photo introuvable.');
   pending.delete(id);
-  return fsp.readFile(await wait);
+  const file = await wait;
+  return { name: path.basename(file), data: await fsp.readFile(file) };
+}
+
+// Photo de test depuis les réglages : prouve que c'est bien le fichier de l'appareil.
+async function testShot(base, folder) {
+  await test(base);
+  return fetchCapture(await trigger(base, folder));
 }
 
 async function oldestFirst(folder, files) {
@@ -247,4 +293,6 @@ async function waitForFile(folder, name, before) {
   throw new CameraError("La photo n'est pas arrivée sur l'ordinateur. Réglez l'appareil en JPEG et, dans digiCamControl, le transfert sur « Save to PC only ».");
 }
 
-module.exports = { test, startLiveView, stopLiveView, proxy, trigger, fetchCapture, CameraError };
+module.exports = {
+  test, startLiveView, stopLiveView, proxy, trigger, fetchCapture, testShot, getSettings, setSetting, CameraError,
+};
